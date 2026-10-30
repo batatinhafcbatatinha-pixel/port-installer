@@ -12,6 +12,7 @@ import unittest
 from engine import Cancelled, delete_source, install
 from layout import build_layout
 from media import Entry, inventory, safe_path
+from prepare_folder import prepare
 
 PAYLOAD = b'game executable fixture'
 SHA = hashlib.sha256(PAYLOAD).hexdigest()
@@ -65,6 +66,19 @@ class InstallerTests(unittest.TestCase):
         subprocess.run(['g++', '-std=c++17', str(source), '-o', str(executable)], check=True, capture_output=True)
         result = subprocess.run([str(executable), str(self.out / 'game_files')], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_prepare_without_iso(self):
+        install(self.source, self.out, CONFIG)
+        result = prepare(self.out, CONFIG)
+        self.assertFalse(result['isoRequired'])
+        before = (self.out / 'game_files/.disc/layout.tsv').read_bytes()
+        prepare(self.out, CONFIG)
+        self.assertEqual(before, (self.out / 'game_files/.disc/layout.tsv').read_bytes())
+
+    def test_prepare_rejects_incomplete_folder(self):
+        install(self.source, self.out, CONFIG)
+        with self.assertRaises(ValueError):
+            prepare(self.out, {**CONFIG, 'expected_files': {'MISSING.DAT': 4}})
 
     def test_repeat_verifies_existing_files(self):
         install(self.source, self.out, CONFIG)

@@ -10,9 +10,6 @@
   "required_paths": [],
   "expected_files": {
     "DATA.PAK": 2325063680,
-    "mc0/BASLUS-21815Ben101/BASLUS-21815Ben101": 2060,
-    "mc0/BASLUS-21815Ben101/icon.ico": 78168,
-    "mc0/BASLUS-21815Ben101/icon.sys": 964,
     "MODULES/CDVDSTM.IRX": 33521,
     "MODULES/IOMGR.IRX": 27832,
     "MODULES/IOPRP310.IMG": 278353,

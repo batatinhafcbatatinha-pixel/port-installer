@@ -1,5 +1,12 @@
 # Include after the runtime target and other game-local adaptations exist.
 find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+if(NOT PORT_GAME_ROOT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../installer.json")
+    get_filename_component(PORT_GAME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+endif()
+if(PORT_GAME_ROOT AND EXISTS "${PORT_GAME_ROOT}/game_files" AND EXISTS "${PORT_GAME_ROOT}/installer.json")
+    execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/../prepare_folder.py"
+        --root "${PORT_GAME_ROOT}" --config "${PORT_GAME_ROOT}/installer.json" COMMAND_ERROR_IS_FATAL ANY)
+endif()
 get_target_property(_pi_source ps2_runtime SOURCE_DIR)
 file(GLOB_RECURSE _pi_inputs CONFIGURE_DEPENDS "${_pi_source}/src/lib/Kernel/Stubs/*")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_pi_inputs}

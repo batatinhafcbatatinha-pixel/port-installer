@@ -23,7 +23,15 @@ Cancelamento remove o arquivo temporário corrente. Arquivos já verificados per
 
 `layout.py` gera apenas um índice de extensões e pequenos metadados de diretório em `game_files/.disc/`. O conteúdo continua em arquivos comuns, sem reconstruir uma ISO nem manter um pacote com o conteúdo completo. Importações de ISO preservam os LBNs dos arquivos; pastas recebem um layout determinístico. Recursos que tenham LBNs originais codificados internamente exigem teste específico quando importados de pasta.
 
-`runtime/extracted_files.cmake` gera cópias locais dos pontos de acesso CD do PS2Recomp, incluindo leituras nativas do EE e IOP. Inclua depois das adaptações específicas do jogo e recompile o runtime. O checkout compartilhado não é alterado. Builds antigos precisam ser recompilados; instalar dados não modifica um executável antigo.
+`runtime/extracted_files.cmake` gera cópias locais dos pontos de acesso CD do PS2Recomp, incluindo leituras nativas do EE e IOP. Inclua depois das adaptações específicas do jogo e recompile o runtime. O checkout compartilhado não é alterado. Nos builds adaptados, os leitores EE/IOP não expõem nem abrem uma ISO de fallback; usam somente a pasta e seu índice. Builds antigos precisam ser recompilados; instalar dados não modifica um executável antigo.
+
+Para uma pasta copiada manualmente, sem ISO:
+
+```sh
+python tools/port-installer/prepare_folder.py --root . --config installer.json
+```
+
+O preparo valida a revisão e os tamanhos obrigatórios, mantém um índice existente compatível ou constrói um layout determinístico dos arquivos. `--rebuild-layout` força um novo layout. A configuração CMake também prepara a pasta quando recebe `PORT_GAME_ROOT`. Saves `mc0/` e `mc1/` não fazem parte do inventário do disco.
 
 ## Desenvolvimento e distribuição
 
