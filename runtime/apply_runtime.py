@@ -49,6 +49,7 @@ s = replace(s, '    bool readCdSectors(uint32_t lbn, uint32_t sectors, uint8_t *
             return ok;
         }
 ''')
+s = replace(s, '        return PS2Runtime::getIoPaths().cdImage;', '        return {}; // Extracted-only port: a raw image is never a runtime fallback.')
 helper.write_text(s, encoding='utf-8')
 host = a.source / 'src/lib/ps2_iop_host.cpp'
 s = host.read_text(encoding='utf-8-sig')
@@ -56,7 +57,7 @@ s = '#include "extracted_disc.h"\n' + s
 needle = '        return paths.cdImage.string();'
 s = replace(s, needle, '''        if (std::filesystem::exists(paths.cdRoot / ".disc/layout.tsv"))
             return (paths.cdRoot / ".disc/layout.tsv").string();
-''' + needle)
+''' + '        return {}; // Never expose a raw disc image to the IOP.')
 s = replace(s, 'uint64_t PS2IopHostAdapter::openHostFile(std::string_view path)\n{', '''namespace {
     constexpr uint64_t kExtractedHandle = UINT64_MAX;
     port_install::ExtractedDisc& hostExtractedDisc() {
