@@ -6,7 +6,7 @@ Uma janela local para escolher a ISO ou pasta completa, acompanhar extração/c�
 
 ## Usar em um jogo
 
-Abra `Instalar-Arquivos.cmd` na raiz do port. Ele usa a configuração `installer.json` e o submódulo fixado em `tools/port-installer`. Para um checkout novo:
+Abra `Install-Files.cmd` na raiz do port. Ele usa a configuração `installer.json` e o submódulo fixado em `tools/port-installer`. Para um checkout novo:
 
 ```sh
 git submodule update --init tools/port-installer
