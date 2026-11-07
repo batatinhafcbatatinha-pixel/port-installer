@@ -16,7 +16,8 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <Product>Port launcher</Product>
     <Description>Installs, configures and starts PC ports built from your own game disc, alone or inside a recompiler (PS2Recomp games/).</Description>
-    <Version>1.0.0</Version>
+    <!-- CI sets the version from the tag (v0.4.0) or, for nightly builds, the newest tag plus the run number; 0.0.0 = a local build. -->
+    <Version Condition="'$(Version)' == ''">0.0.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />

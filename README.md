@@ -17,8 +17,22 @@ Nothing from any game is in this repository or in its releases: the game always 
    compiles the game. It takes one to several hours the first time; finished steps are skipped when you run it again.
 3. **PLAY**. The **PC settings** tab holds the same options as the in-game F1 menu.
 
-The **Game** list at the top switches between the games of the recompiler; **Dependencies** shows what is installed and
-installs single parts; **Install** shows the log (also in `games/<game>/setup-log.txt`).
+The window works like an emulator's game list: a menu bar, a toolbar (open ISO, game folders, refresh, play, stop,
+install, settings, dependencies, log), the library as a list or a grid of covers with search and sorting, the selected
+game in a panel at the right, the setup log at the bottom and a status bar.
+
+- **Game folders** (File > Add game folders, or drop a folder on the window): the launcher searches them and their
+  subfolders for `.iso` images and extracted disc folders and recognises each game from the disc; a found disc is used
+  by INSTALL without asking. Results are cached (`%LOCALAPPDATA%\port-launcher`), so a rescan (F5) only reads new or
+  changed images. PS2 discs without a profile show up too and can be built with the generic path.
+- **Covers**: your own picture (Game > Choose cover), `games/<game>/cover.png|jpg`, the disc's icon (PSP `ICON0.PNG`), or,
+  when View > Download covers is on, a picture by disc serial from the recompiler's `cover_url` (`{serial}` = `SLUS-21423`;
+  PS2 default: the xlenore/ps2-covers collection, as PCSX2 uses). Without one, a tile is drawn from the name.
+- **Updates** (Updates menu): channel *Stable* (the newest release) or *Nightly* (the build of the newest commit, kept by
+  CI in the `nightly` pre-release); check on start, update the launcher automatically, and optionally update the
+  recompiler (git pull for a clone, the source ZIP otherwise; stable follows its newest release when it has one).
+
+PC settings and dependencies open in their own windows; the log is also in `games/<game>/setup-log.txt`.
 
 ## What is here
 
@@ -43,8 +57,10 @@ dotnet build launcher/Launcher.csproj -c Release -o build/launcher
 ```
 
 Test aids: `Launcher.exe --root <recomp> --game <id> --shot out.png [--shot-tab N] [--theme dark|light]` renders the window
-to a PNG; `--detect <iso or folder> out.txt` writes the boot executable and the matching game. A tag `v*` publishes
-`Launcher.exe` as a release.
+to a PNG (tab 0 library, 1 dependencies, 2 log, 3 PC settings, 4 list view); `--detect <iso or folder> out.txt` writes the
+boot executable and the matching game; `--check-updates out.txt` writes what each update channel offers;
+`PORT_LAUNCHER_HOME=<folder>` keeps preferences, game folders and caches there instead of the user profile. A tag `v*`
+publishes `Launcher.exe` as a release (version from the tag); every push to `main` replaces the `nightly` pre-release.
 
 ## Single-game kits (older ports)
 

@@ -42,7 +42,7 @@ sealed partial class MainForm {
     depsRecheckButton = new FlatButton(L.T("Verificar de novo", "Check again"), ButtonKind.Secondary, 170, 40) { Margin = new Padding(0, 0, 10, 0), Anchor = AnchorStyles.Right };
     depsRecheckButton.Click += (s, e) => CheckDeps();
     depsAllButton = new FlatButton(L.T("Instalar tudo o que falta", "Install everything missing"), ButtonKind.Primary, 240, 40) { Margin = Padding.Empty, Anchor = AnchorStyles.Right };
-    depsAllButton.Click += (s, e) => Install();
+    depsAllButton.Click += (s, e) => FromDeps(() => Install(Current?.Disc));
     bottom.Controls.Add(depsSummary, 0, 0);
     bottom.Controls.Add(depsRecheckButton, 1, 0);
     bottom.Controls.Add(depsAllButton, 2, 0);
@@ -96,6 +96,7 @@ sealed partial class MainForm {
 
 
   void RenderDeps() {
+    if (depsList == null || depsList.IsDisposed) return;
     depsList.SuspendLayout();
     depsList.Controls.Clear();
     depButtons.Clear();
@@ -127,7 +128,7 @@ sealed partial class MainForm {
       if (d.OnSystemDrive && sizeText.Length > 0) size.Controls.Add(Words(L.T("no C:", "on C:"), Theme.UI(9f), Theme.Text3, Padding.Empty));
       var button = new FlatButton(d.Only == null ? L.T("Montar", "Build") : L.T("Instalar", "Install"), ButtonKind.Blue, 112, 36) { Anchor = AnchorStyles.Right, Margin = Padding.Empty, Tag = d };
       button.Visible = d.Ok == false && root != null;  // before the kit is downloaded only "install everything" works
-      button.Click += (s, e) => InstallDep((Dep)((Control)s).Tag);
+      button.Click += (s, e) => { var dep = (Dep)((Control)s).Tag; FromDeps(() => InstallDep(dep)); };
       depButtons.Add(button);
       row.Controls.Add(dot, 0, 0);
       row.Controls.Add(name, 1, 0);
@@ -145,7 +146,7 @@ sealed partial class MainForm {
     var missing = deps.Where(d => d.Ok == false).ToList();
     double onC = missing.Where(d => d.OnSystemDrive).Sum(d => d.Gb);
     double here = missing.Where(d => !d.OnSystemDrive).Sum(d => d.Gb);
-    string folder = root ?? folderBox.Text;
+    string folder = root ?? DefaultInstallFolder();
     string driveName = Path.GetPathRoot(folder);
     double freeHere = FreeGb(driveName), freeC = FreeGb(Path.GetPathRoot(Environment.SystemDirectory));
     bool sameDrive = string.Equals(driveName, Path.GetPathRoot(Environment.SystemDirectory), StringComparison.OrdinalIgnoreCase);
@@ -171,7 +172,7 @@ sealed partial class MainForm {
   }
 
   void UpdateDepButtons() {
-    if (depsAllButton == null) return;
+    if (depsAllButton == null || depsAllButton.IsDisposed) return;
     bool busy = Busy;
     foreach (var b in depButtons) b.Enabled = !busy && root != null;
     depsAllButton.Enabled = !busy && deps.Any(d => d.Ok == false);
@@ -180,8 +181,8 @@ sealed partial class MainForm {
 
   void InstallDep(Dep d) {
     if (Busy || root == null) return;
-    if (d.Only == null) { Install(); return; }
-    ShowPage(pageInstall);
+    if (d.Only == null) { Install(Current?.Disc); return; }
+    ShowLog();
     log.Clear();
     progress.Value = 0;
     RunSetup(d.Only);

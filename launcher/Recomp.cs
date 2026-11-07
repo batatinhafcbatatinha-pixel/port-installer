@@ -26,6 +26,7 @@ sealed class Recomp {
   public string Root, Name, Repo, Branch, Setup, ToolsDir, LauncherJson;
   public List<RecompGame> Games = new List<RecompGame>();
   public IDictionary<string, object> Generic;   // launcher.json "generic": setup.json template for discs with no profile
+  public string CoverUrl;                        // launcher.json "cover_url": cover pictures by disc serial ({serial} = SLUS-21423)
   public string PortsDir => Path.Combine(Root, ".local", "ports");
 
   // A port folder for a disc that has no profile in the repository: built by the generic pipeline (tools/ps2port).
@@ -82,6 +83,7 @@ sealed class Recomp {
       ToolsDir = Path.Combine(root, Str(d, "tools_dir", ".local/tools")), LauncherJson = File.ReadAllText(json),
     };
     r.Generic = d.TryGetValue("generic", out var gen) ? gen as IDictionary<string, object> : null;
+    r.CoverUrl = Str(d, "cover_url", r.Name.IndexOf("PS2", StringComparison.OrdinalIgnoreCase) >= 0 ? Covers.DefaultPs2Url : null);
     // Games of the repository (games/), then games the player added from a disc with no profile (.local/ports).
     var dirs = new List<string>();
     foreach (string folder in new[] { Path.Combine(root, games), r.PortsDir })
@@ -147,7 +149,9 @@ sealed class Recomp {
     target = Path.GetFullPath(target);
     if (Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any() && !File.Exists(Path.Combine(target, "launcher.json")))
       throw new IOException(L.T("A pasta escolhida não está vazia: ", "The chosen folder is not empty: ") + target);
-    string url = $"https://codeload.github.com/{repo}/zip/refs/heads/{branch}";
+    string sha = null;
+    try { sha = Updater.RemoteHead(repo, branch); } catch (Exception) { }
+    string url = sha != null ? $"https://codeload.github.com/{repo}/zip/{sha}" : $"https://codeload.github.com/{repo}/zip/refs/heads/{branch}";
     string zip = Path.Combine(Path.GetTempPath(), repo.Replace('/', '-') + "-" + branch + ".zip");
     log(L.T("Baixando ", "Downloading ") + url);
     using (var web = new WebClient()) {
@@ -157,6 +161,7 @@ sealed class Recomp {
     log(L.T("Extraindo para ", "Extracting to ") + target);
     KitDownload.Unzip(zip, target);
     File.Delete(zip);
+    if (sha != null) Updater.SaveLocalHead(target, sha);
     log("OK");
     return target;
   }
@@ -248,7 +253,7 @@ sealed class Recomp {
     return null;
   }
 
-  static byte[] ReadDiscFile(string disc, string rel) {
+  public static byte[] ReadDiscFile(string disc, string rel) {
     if (Directory.Exists(disc)) {
       string f = Path.Combine(disc, rel.Replace('/', Path.DirectorySeparatorChar));
       return File.Exists(f) && new FileInfo(f).Length <= (16 << 20) ? File.ReadAllBytes(f) : null;
