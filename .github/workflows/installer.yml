@@ -1,8 +1,12 @@
 name: Installer
 on:
   push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -25,3 +29,31 @@ jobs:
         with:
           name: Instalar-Arquivos-Windows
           path: dist/Instalar-Arquivos.exe
+  launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      # .NET Framework 4.8 (part of Windows 10 and 11): the player installs nothing to run it.
+      - run: dotnet build launcher/Launcher.csproj -c Release -o dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Launcher
+          path: dist/Launcher.exe
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, launcher]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Launcher
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+              --notes "Launcher.exe: put it in (or run it next to) a recompiler such as PS2Recomp, or run it alone to download one. Source code only; nothing from any game."
+          gh release upload "$GITHUB_REF_NAME" Launcher.exe -R "$GITHUB_REPOSITORY" --clobber

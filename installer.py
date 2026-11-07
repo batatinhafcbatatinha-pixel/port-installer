@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=Path, default=(Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path.cwd()) / 'installer.json')
     parser.add_argument('--root', type=Path)
+    parser.add_argument('--source', help='disc image or folder to install from (starts right away)')
     args = parser.parse_args()
     if not args.config.is_file():
         parser.error('Configuração installer.json não encontrada ao lado do instalador')
@@ -173,6 +174,8 @@ def main():
                             messagebox.showerror('Não foi possível apagar', str(exc))
                     else:
                         append('Origem preservada.')
+                    if args.source:  # started by the launcher: hand back to the build
+                        app.after(1500, app.destroy)
                 else:
                     status.set(event['text'])
                     append(event['text'])
@@ -196,6 +199,9 @@ def main():
             app.destroy()
     app.protocol('WM_DELETE_WINDOW', close)
     app.after(100, poll)
+    if args.source:
+        source.set(args.source)
+        app.after(300, start)
     app.mainloop()
 
 
