@@ -33,15 +33,40 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
       # .NET Framework 4.8 (part of Windows 10 and 11): the player installs nothing to run it.
-      - run: dotnet build launcher/Launcher.csproj -c Release -o dist
+      # Version: the tag (v0.4.0 -> 0.4.0), or for every other build the newest tag plus the run number
+      # (0.4.0.57), so the launcher's update channels can tell builds apart; the commit goes in too.
+      - shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') { $v = $env:GITHUB_REF_NAME.Substring(1) }
+          else {
+            $tag = git describe --tags --abbrev=0 --match 'v*' 2>$null
+            $base = if ($tag) { $tag.Substring(1) } else { '0.1.0' }
+            $v = "$base.$env:GITHUB_RUN_NUMBER"
+          }
+          "VERSION=$v" >> $env:GITHUB_ENV
+          dotnet build launcher/Launcher.csproj -c Release -o dist -p:Version=$v -p:SourceRevisionId=$env:GITHUB_SHA
       - uses: actions/upload-artifact@v4
         with:
           name: Launcher
           path: dist/Launcher.exe
+      # Nightly channel: every push to main replaces the "nightly" pre-release with this build.
+      - if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Nightly build of the launcher (the newest commit; may be less tested than a release).
+          commit: $GITHUB_SHA
+          version: $VERSION
+          Source code only; nothing from any game."
+          gh release delete nightly -R "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create nightly dist/Launcher.exe -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" --title "Nightly ($VERSION)" --notes "$notes"
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [test, launcher]

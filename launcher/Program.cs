@@ -22,12 +22,25 @@ static class Program {
     Application.SetCompatibleTextRenderingDefault(false);
     string dir = AppDomain.CurrentDomain.BaseDirectory;
     Theme.Load();
+    Updater.CleanUp();
     // Test aid: --shot <file.png> [tab index] draws the window into a PNG and exits (no clicks needed);
     // --theme dark|light overrides the saved theme for that run.
     string themeArg = Arg(args, "--theme");
     if (themeArg != null) Theme.Apply(themeArg);
     string shotFile = Arg(args, "--shot");
     int shotTab = int.TryParse(Arg(args, "--shot-tab"), out int t) ? t : 0;
+
+    // Test aid: --check-updates <out.txt> writes what each update channel offers.
+    string checkFile = Arg(args, "--check-updates");
+    if (checkFile != null) {
+      var sb = new System.Text.StringBuilder("this: " + Updater.Describe() + "\n");
+      foreach (var ch in new[] { UpdateChannel.Stable, UpdateChannel.Nightly }) {
+        try { var r = Updater.Latest(ch); sb.Append(ch + ": " + (r == null ? "-" : r.Display + " " + r.Version + " " + r.Commit + " newer=" + Updater.IsNewer(r, ch) + " " + r.Url) + "\n"); }
+        catch (Exception ex) { sb.Append(ch + ": " + ex.Message + "\n"); }
+      }
+      File.WriteAllText(checkFile, sb.ToString());
+      return;
+    }
 
     // 1. A single-game kit: launcher.json next to the exe or built into it.
     var config = File.Exists(Path.Combine(dir, "launcher.json")) && Recomp.Find(dir) == null ? GameConfig.Load(dir) : null;

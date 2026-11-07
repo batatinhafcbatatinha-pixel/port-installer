@@ -12,7 +12,7 @@ namespace PortLauncher {
 
 static class Theme {
   public static Color Bg, Surface, Surface2, Hover, Border, Text, Text2, Text3, Accent, AccentHover, OnAccent,
-      Blue, BlueHover, Danger, DangerHover, Disabled, DisabledText, Link;
+      Blue, BlueHover, Danger, DangerHover, Disabled, DisabledText, Link, Warn, Selection;
   public static bool Dark;
 
   // "system" follows Windows (Settings > Personalization > Colors > app mode), else "dark" or "light".
@@ -47,6 +47,7 @@ static class Theme {
       Blue = Color.FromArgb(64, 122, 230); BlueHover = Color.FromArgb(86, 142, 246);
       Danger = Color.FromArgb(226, 92, 84); DangerHover = Color.FromArgb(240, 114, 106);
       Disabled = Color.FromArgb(40, 44, 52); DisabledText = Color.FromArgb(118, 125, 137); Link = Color.FromArgb(118, 168, 248);
+      Warn = Color.FromArgb(230, 172, 62); Selection = Color.FromArgb(38, 70, 120);
     } else {
       Bg = Color.FromArgb(241, 243, 247); Surface = Color.White; Surface2 = Color.FromArgb(240, 242, 246);
       Hover = Color.FromArgb(228, 232, 239); Border = Color.FromArgb(214, 219, 228);
@@ -55,6 +56,7 @@ static class Theme {
       Blue = Color.FromArgb(38, 99, 214); BlueHover = Color.FromArgb(30, 86, 192);
       Danger = Color.FromArgb(206, 62, 54); DangerHover = Color.FromArgb(186, 50, 44);
       Disabled = Color.FromArgb(229, 232, 237); DisabledText = Color.FromArgb(146, 152, 164); Link = Color.FromArgb(30, 96, 210);
+      Warn = Color.FromArgb(196, 128, 18); Selection = Color.FromArgb(206, 224, 250);
     }
   }
 
@@ -385,9 +387,25 @@ sealed class DarkMenuRenderer : ToolStripProfessionalRenderer {
     public override Color CheckBackground => Theme.Surface2;
     public override Color CheckSelectedBackground => Theme.Hover;
     public override Color CheckPressedBackground => Theme.Hover;
+    // The window's menu bar (File, Game, View...).
+    public override Color MenuStripGradientBegin => Theme.Surface;
+    public override Color MenuStripGradientEnd => Theme.Surface;
+    public override Color MenuItemSelectedGradientBegin => Theme.Hover;
+    public override Color MenuItemSelectedGradientEnd => Theme.Hover;
+    public override Color MenuItemPressedGradientBegin => Theme.Surface2;
+    public override Color MenuItemPressedGradientMiddle => Theme.Surface2;
+    public override Color MenuItemPressedGradientEnd => Theme.Surface2;
+    public override Color ToolStripBorder => Theme.Surface;
+    public override Color SeparatorDark => Theme.Border;
+    public override Color SeparatorLight => Theme.Border;
   }
   public DarkMenuRenderer() : base(new Colors()) { RoundedEdges = false; }
-  protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e) { e.TextColor = Theme.Text; base.OnRenderItemText(e); }
+  protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e) { e.TextColor = e.Item.Enabled ? Theme.Text : Theme.DisabledText; base.OnRenderItemText(e); }
+  protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e) { e.ArrowColor = Theme.Text2; base.OnRenderArrow(e); }
+  protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e) {
+    int y = e.Item.Height / 2;
+    using (var p = new Pen(Theme.Border)) e.Graphics.DrawLine(p, 8, y, e.Item.Width - 8, y);
+  }
   protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e) {
     var g = e.Graphics;
     Theme.Smooth(g);
