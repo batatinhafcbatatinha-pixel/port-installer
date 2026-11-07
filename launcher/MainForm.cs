@@ -198,6 +198,21 @@ sealed partial class MainForm : Form {
       path = d.FileName;
     }
     var match = recomp.Detect(path, out string boot);
+    if (match == null && boot != null && recomp.Generic != null) {
+      // No profile for this disc: the generic pipeline (any game) can still try to build it.
+      if (!Dialog.Ask(this, Text, L.T(
+              $"Este disco ({boot}) não tem um perfil em {recomp.Name}.\n\nDá para tentar montar mesmo assim com o caminho genérico, que serve para qualquer jogo: " +
+              "ele analisa o seu disco, traduz o jogo inteiro e compila. Jogos sem perfil podem não funcionar ou parar em algum ponto; " +
+              "o que faltar é traduzido enquanto você joga e entra na próxima montagem.\n\nTentar?",
+              $"This disc ({boot}) has no profile in {recomp.Name}.\n\nThe generic path, which works for any game, can still try: " +
+              "it analyses your disc, translates the whole game and compiles it. Games without a profile may not work or may stop somewhere; " +
+              "whatever is missing is translated while you play and goes into the next build.\n\nTry it?"),
+              L.T("Tentar", "Try"), L.T("Cancelar", "Cancel"))) return;
+      string id = recomp.CreateGenericPort(path, boot);
+      if (id == null) { Dialog.Info(this, Text, L.T("Não foi possível ler este disco.", "This disc could not be read.")); return; }
+      SwitchGame(id, path);
+      return;
+    }
     if (match == null) {
       Dialog.Info(this, Text, boot == null
           ? L.T("Este disco não é de nenhum jogo de " + recomp.Name + ", ou a imagem não é uma .iso de setores de 2048 bytes.", "This disc is not one of the " + recomp.Name + " games, or the image is not an .iso with 2048-byte sectors.")

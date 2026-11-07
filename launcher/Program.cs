@@ -38,6 +38,14 @@ static class Program {
     var recomp = Recomp.Find(Arg(args, "--root") ?? dir);
     // Test aid: --detect <iso or folder> <out.txt> writes the boot executable and the game it selects.
     string detect = Arg(args, "--detect");
+    // Test aid: --add-disc <iso or folder> <out.txt> creates the generic port of a disc with no profile.
+    string addDisc = Arg(args, "--add-disc");
+    if (addDisc != null && recomp != null) {
+      var known = recomp.Detect(addDisc, out string bootName);
+      string created = known == null ? recomp.CreateGenericPort(addDisc, bootName) : "profile:" + known.Id;
+      File.WriteAllText(args[Array.IndexOf(args, "--add-disc") + 2], (created ?? "-") + "\n");
+      return;
+    }
     if (detect != null && recomp == null) { File.WriteAllText(args[Array.IndexOf(args, "--detect") + 2], "no recompiler\n"); return; }
     if (detect != null) {
       var detected = recomp.Detect(detect, out string boot);
@@ -58,6 +66,7 @@ static class Program {
     string source = null;
     int page = 0;
     while (true) {
+      recomp = Recomp.Load(recomp.Root) ?? recomp;   // a port added from a disc shows up in the list
       var game = recomp.Games.FirstOrDefault(g => g.Id == gameId) ?? recomp.Games[0];
       Settings.SaveLastGame(recomp.Root, game.Id);
       var form = new MainForm(recomp.ConfigFor(game), game.Dir, page, recomp, game, source);
