@@ -1,6 +1,7 @@
 # Port launcher / installer
 
-The launcher and game-file installer used by the recompilers (PS2Recomp `games/`) and by the single-game port kits.
+The launcher and game-file installer used by the recompilers ([PS2Recomp](https://github.com/batatinhafcbatatinha-pixel/PS2Recomp) `games/`,
+[xboxrecomp](https://github.com/batatinhafcbatatinha-pixel/xboxrecomp) `games/`, [PSPRecomp](https://github.com/batatinhafcbatatinha-pixel/PSPRecomp) `profiles/`) and by the single-game port kits.
 Nothing from any game is in this repository or in its releases: the game always comes from your own disc.
 
 ## Play a game (recompilers)
@@ -10,7 +11,8 @@ Nothing from any game is in this repository or in its releases: the game always 
      at its root (it downloads `Launcher.exe` from the [releases](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases)), or
    - download only `Launcher.exe` from the [releases](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases) and run it:
      it asks for a folder and downloads the recompiler's source there.
-2. Click **CHOOSE ISO...** and pick your disc image. The game is recognised from the disc (`SYSTEM.CNF`); the launcher then
+2. Click **CHOOSE ISO...** and pick your disc image. The game is recognised from the disc (PS2: `SYSTEM.CNF`; PSP and Xbox:
+   SHA-256 of the small files listed in the game's `installer.json`, read from ISO 9660 or XDVDFS); the launcher then
    installs what is missing (Python, C++ Build Tools, CMake, Ninja, Ghidra), copies and checks the game files, translates and
    compiles the game. It takes one to several hours the first time; finished steps are skipped when you run it again.
 3. **PLAY**. The **PC settings** tab holds the same options as the in-game F1 menu.

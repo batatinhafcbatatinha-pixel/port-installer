@@ -18,6 +18,8 @@ namespace PortLauncher {
 sealed class RecompGame {
   public string Id, Dir, Name, Disc;
   public HashSet<string> Executables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);  // disc file names of installer.json required_files
+  public Dictionary<string, string> Required = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);  // path -> SHA-256
+  public Dictionary<string, long> Sizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);         // expected_files
 }
 
 sealed class Recomp {
@@ -58,8 +60,11 @@ sealed class Recomp {
         try {
           var s = Json(setup);
           var g = new RecompGame { Id = Path.GetFileName(dir), Dir = dir, Name = Str(s, "game", Path.GetFileName(dir)), Disc = Str(s, "disc", "") };
-          if (Json(installer).TryGetValue("required_files", out var req) && req is IDictionary<string, object> files)
-            foreach (var name in files.Keys) g.Executables.Add(Path.GetFileName(name));
+          var inst = Json(installer);
+          if (inst.TryGetValue("required_files", out var req) && req is IDictionary<string, object> files)
+            foreach (var kv in files) { g.Executables.Add(Path.GetFileName(kv.Key)); g.Required[kv.Key] = Convert.ToString(kv.Value); }
+          if (inst.TryGetValue("expected_files", out var exp) && exp is IDictionary<string, object> sizes)
+            foreach (var kv in sizes) g.Sizes[kv.Key] = Convert.ToInt64(kv.Value);
           r.Games.Add(g);
         } catch (Exception) { }
       }
@@ -124,51 +129,136 @@ sealed class Recomp {
     return target;
   }
 
+  // Which game a disc image (or extracted folder) is. PlayStation 2: the executable SYSTEM.CNF boots. Other discs
+  // (PSP: UMD_DATA.BIN, PARAM.SFO): every small required file of a game's installer.json must match its SHA-256.
+  public RecompGame Detect(string path, out string label) {
+    label = BootExecutable(path);
+    if (label != null) return GameForDisc(label);
+    try {
+      byte[] umd = ReadDiscFile(path, "UMD_DATA.BIN");
+      if (umd != null) label = Encoding.ASCII.GetString(umd).Split('|')[0].Trim('\0', ' ');
+      foreach (var g in Games) {
+        var small = g.Required.Where(kv => g.Sizes.TryGetValue(kv.Key, out long n) && n <= (16 << 20)).ToList();
+        if (small.Count == 0) continue;
+        bool all = true;
+        foreach (var kv in small) {
+          byte[] data = ReadDiscFile(path, kv.Key);
+          if (data == null || !string.Equals(Sha256(data), kv.Value, StringComparison.OrdinalIgnoreCase)) { all = false; break; }
+        }
+        if (all) return g;
+      }
+    } catch (Exception) { }
+    return null;
+  }
+
+  static string Sha256(byte[] data) {
+    using (var sha = System.Security.Cryptography.SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(data)).Replace("-", "");
+  }
+
   // The executable named by SYSTEM.CNF (BOOT2 = cdrom0:\SLUS_214.23;1) of a PlayStation 2 disc image or extracted folder.
   public static string BootExecutable(string path) {
     try {
-      string cnf = null;
-      if (Directory.Exists(path)) {
-        string f = Path.Combine(path, "SYSTEM.CNF");
-        if (File.Exists(f)) cnf = File.ReadAllText(f, Encoding.ASCII);
-      } else if (File.Exists(path)) {
-        cnf = IsoFile(path, "SYSTEM.CNF");
-      }
+      byte[] cnf = ReadDiscFile(path, "SYSTEM.CNF");
       if (cnf == null) return null;
-      var m = Regex.Match(cnf, @"BOOT2?\s*=\s*cdrom0?:\\?([^;\s]+)", RegexOptions.IgnoreCase);
+      var m = Regex.Match(Encoding.ASCII.GetString(cnf), @"BOOT2?\s*=\s*cdrom0?:\\?([^;\s]+)", RegexOptions.IgnoreCase);
       return m.Success ? Path.GetFileName(m.Groups[1].Value.Replace('\\', '/')) : null;
     } catch (Exception) { return null; }
   }
 
-  // A file of the ISO 9660 root directory (2048-byte sectors), as text.
-  static string IsoFile(string iso, string wanted) {
+  // A file (up to 16 MB) of an extracted folder or of an ISO 9660 image with 2048-byte sectors; null when missing.
+  // A file of an Xbox / Xbox 360 disc image (XDVDFS): plain XISO or a full XGD1/2/3 image; null when not XDVDFS.
+  static byte[] XdvdfsFile(string iso, string rel) {
     using (var f = File.OpenRead(iso)) {
-      var pvd = new byte[2048];
-      f.Seek(16 * 2048, SeekOrigin.Begin);
-      if (f.Read(pvd, 0, 2048) != 2048 || pvd[0] != 1 || Encoding.ASCII.GetString(pvd, 1, 5) != "CD001") return null;
-      uint rootLba = BitConverter.ToUInt32(pvd, 156 + 2), rootSize = BitConverter.ToUInt32(pvd, 156 + 10);
-      var dir = new byte[Math.Min(rootSize, 1u << 20)];
-      f.Seek((long)rootLba * 2048, SeekOrigin.Begin);
-      f.Read(dir, 0, dir.Length);
-      for (int i = 0; i < dir.Length;) {
-        int len = dir[i];
-        if (len == 0) { i = (i / 2048 + 1) * 2048; continue; }
-        if (i + 33 > dir.Length) break;
-        int nameLen = dir[i + 32];
-        string name = Encoding.ASCII.GetString(dir, i + 33, Math.Min(nameLen, dir.Length - i - 33));
-        int semi = name.IndexOf(';');
-        if (semi >= 0) name = name.Substring(0, semi);
-        if (string.Equals(name, wanted, StringComparison.OrdinalIgnoreCase)) {
-          uint lba = BitConverter.ToUInt32(dir, i + 2), size = BitConverter.ToUInt32(dir, i + 10);
-          var data = new byte[Math.Min(size, 65536u)];
-          f.Seek((long)lba * 2048, SeekOrigin.Begin);
-          f.Read(data, 0, data.Length);
-          return Encoding.ASCII.GetString(data);
+      long[] partitions = { 0, 0x18300000, 0x0FD90000, 0x02080000 };
+      var vd = new byte[2048];
+      foreach (long part in partitions) {
+        if (part + 33 * 2048 > f.Length) continue;
+        f.Seek(part + 32 * 2048, SeekOrigin.Begin);
+        if (f.Read(vd, 0, 2048) != 2048 || Encoding.ASCII.GetString(vd, 0, 20) != "MICROSOFT*XBOX*MEDIA") continue;
+        uint sector = BitConverter.ToUInt32(vd, 20), size = BitConverter.ToUInt32(vd, 24);
+        bool isDir = true;
+        foreach (string name in rel.Split('/')) {
+          if (!isDir || size == 0 || size > (4u << 20)) return null;
+          var dir = new byte[size];
+          f.Seek(part + (long)sector * 2048, SeekOrigin.Begin);
+          f.Read(dir, 0, dir.Length);
+          // The entries form a binary tree (left/right offsets in 4-byte units); visit them all.
+          var pending = new Stack<int>();
+          pending.Push(0);
+          bool found = false;
+          var seen = new HashSet<int>();
+          while (pending.Count > 0 && !found) {
+            int off = pending.Pop();
+            if (off + 14 > dir.Length || !seen.Add(off)) continue;
+            int left = BitConverter.ToUInt16(dir, off) * 4, right = BitConverter.ToUInt16(dir, off + 2) * 4;
+            if (BitConverter.ToUInt16(dir, off) == 0xFFFF) continue;
+            int nameLen = dir[off + 13];
+            if (off + 14 + nameLen > dir.Length) continue;
+            if (string.Equals(Encoding.ASCII.GetString(dir, off + 14, nameLen), name, StringComparison.OrdinalIgnoreCase)) {
+              sector = BitConverter.ToUInt32(dir, off + 4);
+              size = BitConverter.ToUInt32(dir, off + 8);
+              isDir = (dir[off + 12] & 0x10) != 0;
+              found = true;
+            }
+            if (left != 0) pending.Push(left);
+            if (right != 0) pending.Push(right);
+          }
+          if (!found) return null;
         }
-        i += len;
+        if (isDir || size > (16u << 20)) return null;
+        var data = new byte[size];
+        f.Seek(part + (long)sector * 2048, SeekOrigin.Begin);
+        int got = 0;
+        while (got < data.Length) { int n = f.Read(data, got, data.Length - got); if (n <= 0) break; got += n; }
+        return data;
       }
     }
     return null;
+  }
+
+  static byte[] ReadDiscFile(string disc, string rel) {
+    if (Directory.Exists(disc)) {
+      string f = Path.Combine(disc, rel.Replace('/', Path.DirectorySeparatorChar));
+      return File.Exists(f) && new FileInfo(f).Length <= (16 << 20) ? File.ReadAllBytes(f) : null;
+    }
+    if (!File.Exists(disc)) return null;
+    byte[] xbox = XdvdfsFile(disc, rel);
+    if (xbox != null) return xbox;
+    using (var f = File.OpenRead(disc)) {
+      var pvd = new byte[2048];
+      f.Seek(16 * 2048, SeekOrigin.Begin);
+      if (f.Read(pvd, 0, 2048) != 2048 || pvd[0] != 1 || Encoding.ASCII.GetString(pvd, 1, 5) != "CD001") return null;
+      uint lba = BitConverter.ToUInt32(pvd, 156 + 2), size = BitConverter.ToUInt32(pvd, 156 + 10);
+      var parts = rel.Split('/');
+      for (int level = 0; level < parts.Length; ++level) {
+        var dir = new byte[Math.Min(size, 1u << 20)];
+        f.Seek((long)lba * 2048, SeekOrigin.Begin);
+        f.Read(dir, 0, dir.Length);
+        bool found = false;
+        for (int i = 0; i < dir.Length;) {
+          int len = dir[i];
+          if (len == 0) { i = (i / 2048 + 1) * 2048; continue; }
+          if (i + 33 > dir.Length) break;
+          int nameLen = dir[i + 32];
+          string name = Encoding.ASCII.GetString(dir, i + 33, Math.Min(nameLen, dir.Length - i - 33));
+          int semi = name.IndexOf(';');
+          if (semi >= 0) name = name.Substring(0, semi);
+          if (string.Equals(name, parts[level], StringComparison.OrdinalIgnoreCase)) {
+            lba = BitConverter.ToUInt32(dir, i + 2); size = BitConverter.ToUInt32(dir, i + 10);
+            found = true;
+            break;
+          }
+          i += len;
+        }
+        if (!found) return null;
+      }
+      if (size > (16u << 20)) return null;
+      var data = new byte[size];
+      f.Seek((long)lba * 2048, SeekOrigin.Begin);
+      int got = 0;
+      while (got < data.Length) { int n = f.Read(data, got, data.Length - got); if (n <= 0) break; got += n; }
+      return data;
+    }
   }
 }
 
