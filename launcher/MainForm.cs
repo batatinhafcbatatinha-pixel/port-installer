@@ -197,11 +197,10 @@ sealed partial class MainForm : Form {
       if (d.ShowDialog(this) != DialogResult.OK) return;
       path = d.FileName;
     }
-    string boot = Recomp.BootExecutable(path);
-    var match = recomp.GameForDisc(boot);
+    var match = recomp.Detect(path, out string boot);
     if (match == null) {
       Dialog.Info(this, Text, boot == null
-          ? L.T("Não foi possível ler o SYSTEM.CNF desta imagem. Use uma .iso de setores de 2048 bytes.", "Could not read SYSTEM.CNF from this image. Use an .iso with 2048-byte sectors.")
+          ? L.T("Este disco não é de nenhum jogo de " + recomp.Name + ", ou a imagem não é uma .iso de setores de 2048 bytes.", "This disc is not one of the " + recomp.Name + " games, or the image is not an .iso with 2048-byte sectors.")
           : L.T($"Este disco ({boot}) não é de nenhum jogo de {recomp.Name}. Jogos suportados:\n\n", $"This disc ({boot}) is not one of the {recomp.Name} games. Supported games:\n\n") +
             string.Join("\n", recomp.Games.Select(g => "•  " + g.Name + "  (" + g.Disc + ")")));
       return;

@@ -6,5 +6,21 @@
     "folder": "PS2Recomp",
     "pt": "Jogos de PlayStation 2 recompilados para PC (pasta games/ do repositório).",
     "en": "PlayStation 2 games recompiled for PC (the repository's games/ folder)."
+  },
+  {
+    "name": "xboxrecomp (Xbox original)",
+    "repo": "batatinhafcbatatinha-pixel/xboxrecomp",
+    "branch": "ports",
+    "folder": "xboxrecomp",
+    "pt": "Jogos do Xbox original recompilados para PC (pasta games/ do repositório).",
+    "en": "Original Xbox games recompiled for PC (the repository's games/ folder)."
+  },
+  {
+    "name": "PSPRecomp (PSP)",
+    "repo": "batatinhafcbatatinha-pixel/PSPRecomp",
+    "branch": "main",
+    "folder": "PSPRecomp",
+    "pt": "Jogos de PSP recompilados para PC (pasta profiles/ do repositório).",
+    "en": "PSP games recompiled for PC (the repository's profiles/ folder)."
   }
 ]

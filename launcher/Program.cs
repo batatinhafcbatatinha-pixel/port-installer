@@ -38,9 +38,10 @@ static class Program {
     var recomp = Recomp.Find(Arg(args, "--root") ?? dir);
     // Test aid: --detect <iso or folder> <out.txt> writes the boot executable and the game it selects.
     string detect = Arg(args, "--detect");
-    if (detect != null && recomp != null) {
-      string boot = Recomp.BootExecutable(detect);
-      File.WriteAllText(args[Array.IndexOf(args, "--detect") + 2], (boot ?? "-") + " " + (recomp.GameForDisc(boot)?.Id ?? "-") + "\n");
+    if (detect != null && recomp == null) { File.WriteAllText(args[Array.IndexOf(args, "--detect") + 2], "no recompiler\n"); return; }
+    if (detect != null) {
+      var detected = recomp.Detect(detect, out string boot);
+      File.WriteAllText(args[Array.IndexOf(args, "--detect") + 2], (boot ?? "-") + " " + (detected?.Id ?? "-") + "\n");
       return;
     }
     if (recomp == null) {
