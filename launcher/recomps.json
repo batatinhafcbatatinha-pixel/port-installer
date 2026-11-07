@@ -16,6 +16,14 @@
     "en": "Original Xbox games recompiled for PC (the repository's games/ folder)."
   },
   {
+    "name": "rexglue-ports (Xbox 360)",
+    "repo": "batatinhafcbatatinha-pixel/rexglue-ports",
+    "branch": "main",
+    "folder": "rexglue-ports",
+    "pt": "Jogos de Xbox 360 recompilados para PC com o ReXGlue (pasta games/ do repositório).",
+    "en": "Xbox 360 games recompiled for PC with ReXGlue (the repository's games/ folder)."
+  },
+  {
     "name": "PSPRecomp (PSP)",
     "repo": "batatinhafcbatatinha-pixel/PSPRecomp",
     "branch": "main",
