@@ -25,6 +25,35 @@ sealed class RecompGame {
 sealed class Recomp {
   public string Root, Name, Repo, Branch, Setup, ToolsDir, LauncherJson;
   public List<RecompGame> Games = new List<RecompGame>();
+  public IDictionary<string, object> Generic;   // launcher.json "generic": setup.json template for discs with no profile
+  public string PortsDir => Path.Combine(Root, ".local", "ports");
+
+  // A port folder for a disc that has no profile in the repository: built by the generic pipeline (tools/ps2port).
+  // Returns the new game's id, or null when the disc cannot be read.
+  public string CreateGenericPort(string disc, string boot) {
+    if (Generic == null || boot == null) return null;
+    byte[] cnf = ReadDiscFile(disc, "SYSTEM.CNF"), elf = ReadDiscFile(disc, boot);
+    if (cnf == null || elf == null) return null;
+    string id = boot.Replace('.', '_').Replace('_', '-');   // SLUS_214.23 -> SLUS-214-23
+    string dir = Path.Combine(PortsDir, id);
+    Directory.CreateDirectory(dir);
+    string title = Directory.Exists(disc) ? new DirectoryInfo(disc).Name : Path.GetFileNameWithoutExtension(disc);
+    var setup = new Dictionary<string, object>(Generic);
+    setup["game"] = title;
+    setup["disc"] = "PlayStation 2 (" + boot + ")";
+    var js = new JavaScriptSerializer();
+    File.WriteAllText(Path.Combine(dir, "setup.json"), js.Serialize(setup));
+    var installer = new Dictionary<string, object> {
+      ["schema"] = 1, ["name"] = title, ["revision"] = boot, ["filesystem"] = "iso9660", ["destination"] = "game_files",
+      ["required_files"] = new Dictionary<string, object> { ["SYSTEM.CNF"] = Sha256(cnf).ToLowerInvariant(), [boot] = Sha256(elf).ToLowerInvariant() },
+      ["required_paths"] = new object[0],
+    };
+    File.WriteAllText(Path.Combine(dir, "installer.json"), js.Serialize(installer));
+    File.WriteAllText(Path.Combine(dir, "Play.cmd"),
+        "@echo off\r\nrem Starts this game (built by the launcher with tools/ps2port).\r\n" +
+        "python \"%~dp0..\\..\\..\\tools\\ps2port\\ps2port.py\" play --port \"%~dp0.\"\r\nexit /b %errorlevel%\r\n");
+    return id;
+  }
 
   static IDictionary<string, object> Json(string path) =>
       (IDictionary<string, object>)new JavaScriptSerializer().DeserializeObject(File.ReadAllText(path));
@@ -52,9 +81,12 @@ sealed class Recomp {
       Setup = Path.Combine(root, Str(d, "setup", "tools/port-installer/setup/setup.ps1")),
       ToolsDir = Path.Combine(root, Str(d, "tools_dir", ".local/tools")), LauncherJson = File.ReadAllText(json),
     };
-    string gamesDir = Path.Combine(root, games);
-    if (Directory.Exists(gamesDir))
-      foreach (var dir in Directory.GetDirectories(gamesDir).OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) {
+    r.Generic = d.TryGetValue("generic", out var gen) ? gen as IDictionary<string, object> : null;
+    // Games of the repository (games/), then games the player added from a disc with no profile (.local/ports).
+    var dirs = new List<string>();
+    foreach (string folder in new[] { Path.Combine(root, games), r.PortsDir })
+      if (Directory.Exists(folder)) dirs.AddRange(Directory.GetDirectories(folder).OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+    foreach (var dir in dirs) {
         string setup = Path.Combine(dir, "setup.json"), installer = Path.Combine(dir, "installer.json");
         if (!File.Exists(setup) || !File.Exists(installer)) continue;
         try {
