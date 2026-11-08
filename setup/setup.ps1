@@ -5,6 +5,8 @@
 # -NoShortcut skips the desktop shortcut; -Jobs sets the number of parallel compile jobs;
 # -PrepareOnly (Prepare-Build.cmd) runs only the steps that prepare the build files from your disc, not the compile.
 # -Only python|buildtools|tools|game installs just that part (the launcher's Dependencies tab).
+# setup.json "buildtools": false skips the C++ Build Tools (nothing is compiled, e.g. AnyPS5 relinks PS5 games);
+# installer.json "mode": "link" makes game_files a junction to the game folder (-Source) instead of a copy.
 # Recompiler repositories (one folder per game, e.g. PS2Recomp games/<game>): -GameDir is that game's folder
 # (setup.json + installer.json), -ToolsDir the shared portable tools; -Source preselects the disc image.
 param([switch]$Yes, [switch]$Rebuild, [switch]$ToolsOnly, [switch]$NoShortcut, [switch]$PrepareOnly, [int]$Jobs = 0,
@@ -96,7 +98,8 @@ Say "OK: $Python" "OK: $Python" 'Green'
 if ($Only -eq 'python') { Stop-Transcript | Out-Null; exit 0 }
 
 # 2. Visual Studio Build Tools (C++ compiler libraries and the Windows SDK)
-if ($Only -in @('', 'buildtools')) {
+$VsPath = $null
+if ($Only -in @('', 'buildtools') -and $Setup.buildtools -ne $false) {
 Step '2/5 Visual Studio Build Tools (C++)' '2/5 Visual Studio Build Tools (C++)'
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 function Find-VC {
@@ -138,7 +141,7 @@ if ($LASTEXITCODE -ne 0) { Fail 'Downloading the build tools failed. Check your 
 $Tool = @{}
 foreach ($line in $toolLines) { if ($line -match '^(\w+)=(.*)$') { $Tool[$Matches[1]] = $Matches[2] } }
 # The C++ environment of the Build Tools, then the portable tools in front of it.
-if (-not $Only) {
+if (-not $Only -and $VsPath) {
 $vcvars = Join-Path $VsPath 'VC\Auxiliary\Build\vcvars64.bat'
 foreach ($line in (cmd /c "`"$vcvars`" >nul && set")) { if ($line -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] } }
 $front = @($Tool['PATH'] -split ';' | Where-Object { $_ })
@@ -153,6 +156,28 @@ if ($ToolsOnly -or $Only -eq 'tools') { Stop-Transcript | Out-Null; exit 0 }
 # 4. Your game files
 if ($Only -in @('', 'game')) {
 Step "4/5 Your game ($($Setup.disc))" "4/5 Seu jogo ($($Setup.disc))"
+if (-not (Game-Ok) -and $Install.mode -eq 'link') {
+  # The game stays where it is (a PS5 dump is tens of GB): game_files becomes a junction to that folder.
+  if (-not $Source) {
+    Add-Type -AssemblyName System.Windows.Forms
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dialog.Description = $(if ($Pt) { "Escolha a pasta do jogo ($($Setup.disc))" } else { "Choose the game folder ($($Setup.disc))" })
+    if ($dialog.ShowDialog() -ne 'OK') { Fail 'No game folder was chosen.' 'Nenhuma pasta do jogo foi escolhida.' }
+    $Source = $dialog.SelectedPath
+  }
+  if (-not (Test-Path -LiteralPath $Source -PathType Container)) { Fail "Not a folder: $Source" "Nao e uma pasta: $Source" }
+  $link = Join-Path $Root 'game_files'
+  $item = Get-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
+  if ($item) {
+    if (-not $item.LinkType) { Fail "$link exists and is not a link; move it away and run Setup again." "$link existe e nao e um link; mova-a e rode o Setup de novo." }
+    $item.Delete()   # removes only the junction, never the folder it points to
+  }
+  # mklink, not New-Item -Target: Windows PowerShell reads [ ] in the target (common in dump names) as a wildcard.
+  $target = (Resolve-Path -LiteralPath $Source).ProviderPath
+  cmd /c "mklink /J `"$link`" `"$target`"" | Out-Null
+  if ($LASTEXITCODE -ne 0) { Fail "Could not link game_files to $target." "Nao foi possivel ligar game_files a $target." }
+  Say "game_files -> $Source" "game_files -> $Source"
+}
 if (-not (Game-Ok)) {
   # The installer next to this script (port-installer/setup), else the kit's submodule.
   $installer = Join-Path (Split-Path -Parent $PSScriptRoot) 'installer.py'
@@ -224,6 +249,12 @@ if (-not $NoShortcut -and (Test-Path $play) -and (Ask 'Create a desktop shortcut
   $link.Save()
 }
 Write-Host ''
-Say "Done! Play with $($Setup.play) (or the desktop shortcut). F1 in the game opens the PC settings." `
-    "Pronto! Jogue pelo $($Setup.play) (ou pelo atalho na area de trabalho). F1 no jogo abre as configuracoes de PC." 'Green'
+if ($Setup.pc_menu -eq $false) {
+  # No in-game menu (AnyPS5): the PC settings are in the launcher.
+  Say "Done! Play with $($Setup.play) (or the desktop shortcut). The PC settings are in the launcher." `
+      "Pronto! Jogue pelo $($Setup.play) (ou pelo atalho na area de trabalho). As configuracoes de PC ficam no launcher." 'Green'
+} else {
+  Say "Done! Play with $($Setup.play) (or the desktop shortcut). F1 in the game opens the PC settings." `
+      "Pronto! Jogue pelo $($Setup.play) (ou pelo atalho na area de trabalho). F1 no jogo abre as configuracoes de PC." 'Green'
+}
 Stop-Transcript | Out-Null

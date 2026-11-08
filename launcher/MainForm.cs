@@ -176,8 +176,12 @@ sealed partial class MainForm : Form {
       new Label { Text = text, Font = font, ForeColor = color, AutoSize = true, Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = margin };
 
   static TableLayoutPanel AddCard(TableLayoutPanel parent, out Card card, Padding? margin = null) {
-    card = new Card { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = margin ?? new Padding(0, 0, 0, 16) };
+    // The card follows its content's height: an AutoSize panel around a docked stack is measured before the
+    // help texts wrap to the final width, which cut off the last row of short cards.
+    card = new Card { Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = margin ?? new Padding(0, 0, 0, 16) };
     var inner = Stack(Theme.Surface);
+    var c = card;
+    inner.SizeChanged += (s, e) => { int h = inner.Height + c.Padding.Vertical; if (c.Height != h) c.Height = h; };
     card.Controls.Add(inner);
     parent.Controls.Add(card);
     return inner;
@@ -560,7 +564,9 @@ sealed partial class MainForm : Form {
       return L.T("Este disco não tem perfil neste recompilador. O caminho genérico tenta montar qualquer jogo; pode não funcionar ou parar em algum ponto.",
                  "This disc has no profile in this recompiler. The generic path tries to build any game; it may not work or may stop somewhere.");
     switch (e.State) {
-      case EntryState.Ready: return L.T("No jogo, F1 (ou Back+Start no controle) abre as mesmas configurações do PC.", "In the game, F1 (or Back+Start on a controller) opens the same PC settings.");
+      case EntryState.Ready: return cfg.PcMenu
+          ? L.T("No jogo, F1 (ou Back+Start no controle) abre as mesmas configurações do PC.", "In the game, F1 (or Back+Start on a controller) opens the same PC settings.")
+          : L.T("As configurações de PC ficam em Configurar. No jogo: F10 desempenho, F11 tela cheia, F12 captura de tela.", "The PC settings are under Configure. In the game: F10 performance, F11 fullscreen, F12 screenshot.");
       case EntryState.HasDisc: return L.T("O disco foi encontrado nas suas pastas. A montagem instala o que faltar, copia e confere os arquivos e compila o jogo; as etapas prontas são puladas depois.",
                                           "The disc was found in your folders. The build installs what is missing, copies and checks the files and compiles the game; finished steps are skipped later.");
       case EntryState.Kit: return L.T($"O instalador baixa o kit do port (código-fonte), instala as ferramentas, pede o seu disco ({cfg.Disc}) e monta a versão para PC.",
@@ -648,8 +654,9 @@ sealed partial class MainForm : Form {
       }
       if (recomp.Generic != null) {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        // Only discs of this console: a PlayStation 2 disc names its boot executable (SLUS_214.23).
-        foreach (var f in found.Where(f => f.Game == null && f.Label != null && Regex.IsMatch(f.Label, @"^[A-Z]{4}_\d{3}\.\d{2}$", RegexOptions.IgnoreCase))) {
+        // Only discs of this console: a PlayStation 2 disc names its boot executable (SLUS_214.23), a PS5 dump its
+        // title id (PPSA01949); the recompiler's launcher.json "generic_label" says which.
+        foreach (var f in found.Where(f => f.Game == null && f.Label != null && Regex.IsMatch(f.Label, recomp.LabelRegex, RegexOptions.IgnoreCase))) {
           if (!seen.Add(f.Label)) continue;
           string name = f.IsFolder ? new DirectoryInfo(f.Path).Name : Path.GetFileNameWithoutExtension(f.Path);
           entries.Add(new GameEntry { Key = "disc:" + f.Label, Name = name, Serial = Covers.Serial(f.Label) ?? f.Label, Disc = f.Path, NoProfile = true,
@@ -853,7 +860,14 @@ sealed partial class MainForm : Form {
     if (Busy || recomp == null || path == null) return;
     if (boot == null) recomp.Detect(path, out boot);
     if (boot == null) { Dialog.Info(this, Text, L.T("Não foi possível ler este disco.", "This disc could not be read.")); return; }
-    if (!Dialog.Ask(this, Text, L.T(
+    bool ps5 = Recomp.Ps5Title(path, out _) != null;
+    if (ps5 ? !Dialog.Ask(this, Text, L.T(
+            $"Este jogo ({boot}) ainda não foi convertido.\n\nO {recomp.Name} converte o executável do seu dump para um programa do Windows " +
+            "(sem emulação) e liga os arquivos do jogo no lugar, sem copiar. Leva poucos minutos. Jogos ainda podem não funcionar ou parar em algum ponto.\n\nConverter?",
+            $"This game ({boot}) has not been converted yet.\n\n{recomp.Name} converts your dump's executable into a Windows program " +
+            "(no emulation) and links the game files in place, without copying. It takes a few minutes. Games may still not work or may stop somewhere.\n\nConvert it?"),
+            L.T("Converter", "Convert"), L.T("Cancelar", "Cancel"))
+        : !Dialog.Ask(this, Text, L.T(
             $"Este disco ({boot}) não tem um perfil em {recomp.Name}.\n\nDá para tentar montar mesmo assim com o caminho genérico, que serve para qualquer jogo: " +
             "ele analisa o seu disco, traduz o jogo inteiro e compila. Jogos sem perfil podem não funcionar ou parar em algum ponto; " +
             "o que faltar é traduzido enquanto você joga e entra na próxima montagem.\n\nTentar?",
@@ -1136,7 +1150,7 @@ sealed partial class MainForm : Form {
       dynamic shell = Activator.CreateInstance(shellType);
       dynamic link = shell.CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), cfg.Game + ".lnk"));
       link.TargetPath = exe;
-      if (recomp != null) link.Arguments = $"--root \"{recomp.Root}\" --game {game.Id}";
+      if (recomp != null && game != null) link.Arguments = $"--root \"{recomp.Root}\" --game {game.Id}";
       link.WorkingDirectory = root;
       link.IconLocation = exe + ",0";
       link.Save();

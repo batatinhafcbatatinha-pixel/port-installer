@@ -54,9 +54,11 @@ sealed partial class MainForm {
     var list = new List<Dep> {
       new Dep { Name = "Python 3.11+", Detail = L.T("roda os scripts de montagem e o instalador dos arquivos do jogo", "runs the build scripts and the game file installer"),
                 Only = "python", Gb = cfg.PythonGb, OnSystemDrive = true },
-      new Dep { Name = "Microsoft C++ Build Tools", Detail = L.T("bibliotecas C++ e o Windows SDK (pede administrador)", "C++ libraries and the Windows SDK (asks for administrator)"),
-                Only = "buildtools", Gb = cfg.BuildToolsGb, OnSystemDrive = true },
     };
+    // A recompiler that compiles nothing (AnyPS5: deps "buildtools_gb": 0) does not need the C++ Build Tools.
+    if (cfg.BuildToolsGb > 0)
+      list.Add(new Dep { Name = "Microsoft C++ Build Tools", Detail = L.T("bibliotecas C++ e o Windows SDK (pede administrador)", "C++ libraries and the Windows SDK (asks for administrator)"),
+                         Only = "buildtools", Gb = cfg.BuildToolsGb, OnSystemDrive = true });
     foreach (var t in cfg.Tools)
       list.Add(new Dep { Name = t.Name, Only = "tools", Gb = t.Gb, Detail = cfg.ToolsRoot != null
           ? L.T("fica dentro do recompilador (.local\\tools), usado por todos os jogos", "kept inside the recompiler (.local\\tools), shared by every game")
@@ -77,7 +79,7 @@ sealed partial class MainForm {
     var results = await Task.Run(() => {
       var r = new List<KeyValuePair<bool, string>>();
       r.Add(FindPython());
-      r.Add(FindBuildTools());
+      if (cfg.BuildToolsGb > 0) r.Add(FindBuildTools());
       string systemLlvm = SystemLlvm();
       foreach (var t in cfg.Tools) {
         if (t.Id == "llvm" && systemLlvm != null) { r.Add(new KeyValuePair<bool, string>(true, systemLlvm)); continue; }

@@ -1,7 +1,9 @@
 # Port launcher / installer
 
 The launcher and game-file installer used by the recompilers ([PS2Recomp](https://github.com/batatinhafcbatatinha-pixel/PS2Recomp) `games/`,
-[xboxrecomp](https://github.com/batatinhafcbatatinha-pixel/xboxrecomp) `games/`, [PSPRecomp](https://github.com/batatinhafcbatatinha-pixel/PSPRecomp) `profiles/`) and by the single-game port kits.
+[xboxrecomp](https://github.com/batatinhafcbatatinha-pixel/xboxrecomp) `games/`, [PSPRecomp](https://github.com/batatinhafcbatatinha-pixel/PSPRecomp) `profiles/`,
+[rexglue-ports](https://github.com/batatinhafcbatatinha-pixel/rexglue-ports), [AnyPS5](https://github.com/batatinhafcbatatinha-pixel/AnyPS5) for PS5 dumps)
+and by the single-game port kits.
 Nothing from any game is in this repository or in its releases: the game always comes from your own disc.
 
 ## Play a game (recompilers)
@@ -34,6 +36,12 @@ game in a panel at the right, the setup log at the bottom and a status bar.
 
 PC settings and dependencies open in their own windows; the log is also in `games/<game>/setup-log.txt`.
 
+**PlayStation 5 (AnyPS5).** A decrypted dump folder (`eboot.bin` + `sce_sys/param.json`) is recognised by its title id
+(`PPSA01949`) and cover (`sce_sys/icon0.png`). Every PS5 game takes the generic path: the port folder
+(`.local/ports/<title id>`) links `game_files` to the dump (installer.json `"mode": "link"`, nothing is copied), and
+`tools/ps5port` converts the executable and modules with the AnyPS5 relinker in a few minutes; no C++ Build Tools are
+needed (setup.json `"buildtools": false`). The PC settings become AnyPS5 variables when the game starts.
+
 ## What is here
 
 | Path | What |
@@ -46,7 +54,10 @@ PC settings and dependencies open in their own windows; the log is also in `game
 | `integrations/` | `installer.json` of the single-game kits. |
 
 A recompiler that uses it has `tools/port-installer` as a submodule, `launcher.json` at its root (shared PC settings and
-tools) and per game `games/<game>/setup.json` (name, disc, steps) and `installer.json` (supported disc hashes). If the
+tools) and per game `games/<game>/setup.json` (name, disc, steps) and `installer.json` (supported disc hashes).
+launcher.json may also hold `generic` (setup.json template for discs without a profile; `play_cmd` = the Play.cmd it
+writes), `generic_label` (regex of this console's disc labels in the library) and `deps.buildtools_gb: 0` (no C++ Build Tools).
+setup.json `"pc_menu": false` says the game has no in-game F1 menu. If the
 submodule folder is empty (ZIP download), the launcher writes its own copy of these scripts there.
 
 ## Developing

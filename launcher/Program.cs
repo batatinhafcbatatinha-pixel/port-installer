@@ -71,7 +71,7 @@ static class Program {
       recomp = Recomp.Load(root);
       if (recomp == null) return;
     }
-    if (recomp.Games.Count == 0) {
+    if (recomp.Games.Count == 0 && recomp.Generic == null) {
       Dialog.Info(null, recomp.Name, L.T("Nenhum jogo encontrado em ", "No games found in ") + recomp.Root);
       return;
     }
@@ -80,13 +80,23 @@ static class Program {
     int page = 0;
     while (true) {
       recomp = Recomp.Load(recomp.Root) ?? recomp;   // a port added from a disc shows up in the list
-      var game = recomp.Games.FirstOrDefault(g => g.Id == gameId) ?? recomp.Games[0];
-      Settings.SaveLastGame(recomp.Root, game.Id);
-      var form = new MainForm(recomp.ConfigFor(game), game.Dir, page, recomp, game, source);
+      var game = recomp.Games.FirstOrDefault(g => g.Id == gameId) ?? recomp.Games.FirstOrDefault();
+      MainForm form;
+      if (game != null) {
+        Settings.SaveLastGame(recomp.Root, game.Id);
+        form = new MainForm(recomp.ConfigFor(game), game.Dir, page, recomp, game, source);
+      } else {
+        // No game yet (AnyPS5: every game comes from the generic path): the library of found dumps, nothing selected.
+        var empty = GameConfig.Parse(recomp.LauncherJson);
+        empty.Game = recomp.Name;
+        empty.Repo = recomp.Repo;
+        empty.ToolsRoot = recomp.Root;
+        form = new MainForm(empty, null, page, recomp, null, source);
+      }
       if (shotFile != null) form.ShotOnLoad(shotFile, shotTab);
       Application.Run(form);
       if (!form.Restart) break;
-      gameId = form.NextGame ?? game.Id;
+      gameId = form.NextGame ?? game?.Id;
       source = form.NextSource;
       page = form.NextGame != null ? 0 : form.PageForRestart;
     }

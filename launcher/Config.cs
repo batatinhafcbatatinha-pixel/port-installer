@@ -51,6 +51,7 @@ sealed class GameConfig {
   public string Game, Repo, KitAsset, Exe, Ini, Section = "opcoes", Play, Setup = "tools/setup.ps1";
   public string Disc, Minutes, VulkanDir;
   public string ToolsRoot;      // recompiler mode: the repository, whose .local/tools the tool checks are relative to
+  public bool PcMenu = true;   // setup.json "pc_menu": false = the game has no F1 menu (AnyPS5); the settings are only here
   public bool PlainIni;         // key=value lines without sections (PS2 pc-settings.ini)
   public int DiskGb;
   public List<Group> Groups = new List<Group>();

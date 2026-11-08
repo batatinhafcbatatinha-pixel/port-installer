@@ -27,12 +27,33 @@ sealed class Recomp {
   public List<RecompGame> Games = new List<RecompGame>();
   public IDictionary<string, object> Generic;   // launcher.json "generic": setup.json template for discs with no profile
   public string CoverUrl;                        // launcher.json "cover_url": cover pictures by disc serial ({serial} = SLUS-21423)
+  public string LabelRegex = @"^[A-Z]{4}_\d{3}\.\d{2}$";   // launcher.json "generic_label": the disc labels of this console (PS2 boot file)
   public string PortsDir => Path.Combine(Root, ".local", "ports");
 
-  // A port folder for a disc that has no profile in the repository: built by the generic pipeline (tools/ps2port).
-  // Returns the new game's id, or null when the disc cannot be read.
+  // A PlayStation 5 dump folder (eboot.bin + sce_sys/param.json): its title id (PPSA01949) and name, else null.
+  public static string Ps5Title(string path, out string name) {
+    name = null;
+    if (!Directory.Exists(path) || !File.Exists(Path.Combine(path, "eboot.bin"))) return null;
+    byte[] param = ReadDiscFile(path, "sce_sys/param.json");
+    if (param == null) return null;
+    try {
+      var d = (IDictionary<string, object>)new JavaScriptSerializer().DeserializeObject(Encoding.UTF8.GetString(param).TrimStart('﻿'));
+      string id = Str(d, "titleId");
+      if (d.TryGetValue("localizedParameters", out var lp) && lp is IDictionary<string, object> loc) {
+        string def = Str(loc, "defaultLanguage", "en-US");
+        var lang = (loc.TryGetValue(def, out var a) ? a : loc.TryGetValue("en-US", out var b) ? b : loc.Values.FirstOrDefault(v => v is IDictionary<string, object>)) as IDictionary<string, object>;
+        name = Str(lang, "titleName");
+      }
+      return string.IsNullOrEmpty(id) ? null : id;
+    } catch (Exception) { return null; }
+  }
+
+  // A port folder for a disc that has no profile in the repository: built by the generic pipeline (tools/ps2port;
+  // PS5 dumps: tools/ps5port, with the game linked instead of copied). Returns the new game's id, or null when the disc cannot be read.
   public string CreateGenericPort(string disc, string boot) {
     if (Generic == null || boot == null) return null;
+    string ps5 = Ps5Title(disc, out string ps5Name);
+    if (ps5 != null) return CreatePs5Port(disc, ps5, ps5Name);
     byte[] cnf = ReadDiscFile(disc, "SYSTEM.CNF"), elf = ReadDiscFile(disc, boot);
     if (cnf == null || elf == null) return null;
     string id = boot.Replace('.', '_').Replace('_', '-');   // SLUS_214.23 -> SLUS-214-23
@@ -54,6 +75,31 @@ sealed class Recomp {
         "@echo off\r\nrem Starts this game (built by the launcher with tools/ps2port).\r\n" +
         "python \"%~dp0..\\..\\..\\tools\\ps2port\\ps2port.py\" play --port \"%~dp0.\"\r\nexit /b %errorlevel%\r\n");
     return id;
+  }
+
+  // A PS5 dump: the game stays where it is (installer.json "mode": "link" makes game_files a junction to it);
+  // the dump is recognised again by the SHA-256 of its sce_sys/param.json.
+  string CreatePs5Port(string disc, string titleId, string titleName) {
+    byte[] param = ReadDiscFile(disc, "sce_sys/param.json");
+    string dir = Path.Combine(PortsDir, titleId);
+    Directory.CreateDirectory(dir);
+    string title = string.IsNullOrEmpty(titleName) ? new DirectoryInfo(disc).Name : titleName;
+    var setup = new Dictionary<string, object>(Generic);
+    setup.Remove("play_cmd");
+    setup["game"] = title;
+    setup["disc"] = "PlayStation 5 (" + titleId + ")";
+    var js = new JavaScriptSerializer();
+    File.WriteAllText(Path.Combine(dir, "setup.json"), js.Serialize(setup));
+    var installer = new Dictionary<string, object> {
+      ["schema"] = 1, ["name"] = title, ["revision"] = titleId, ["filesystem"] = "folder", ["mode"] = "link", ["destination"] = "game_files",
+      ["required_files"] = new Dictionary<string, object> { ["sce_sys/param.json"] = Sha256(param).ToLowerInvariant() },
+      ["expected_files"] = new Dictionary<string, object> { ["sce_sys/param.json"] = param.LongLength },
+      ["required_paths"] = new object[0],
+    };
+    File.WriteAllText(Path.Combine(dir, "installer.json"), js.Serialize(installer));
+    string play = Str(Generic, "play_cmd");
+    if (play != null) File.WriteAllText(Path.Combine(dir, Str(Generic, "play", "Play.cmd")), play);
+    return titleId;
   }
 
   static IDictionary<string, object> Json(string path) =>
@@ -83,6 +129,7 @@ sealed class Recomp {
       ToolsDir = Path.Combine(root, Str(d, "tools_dir", ".local/tools")), LauncherJson = File.ReadAllText(json),
     };
     r.Generic = d.TryGetValue("generic", out var gen) ? gen as IDictionary<string, object> : null;
+    r.LabelRegex = Str(d, "generic_label", r.LabelRegex);
     r.CoverUrl = Str(d, "cover_url", r.Name.IndexOf("PS2", StringComparison.OrdinalIgnoreCase) >= 0 ? Covers.DefaultPs2Url : null);
     // Games of the repository (games/), then games the player added from a disc with no profile (.local/ports).
     var dirs = new List<string>();
@@ -117,6 +164,7 @@ sealed class Recomp {
     c.Minutes = Str(s, "minutes", c.Minutes);
     if (s.TryGetValue("disk_gb", out var gb) && gb != null) c.DiskGb = Convert.ToInt32(gb);
     if (s.TryGetValue("exe", out var exe) && exe != null) c.Exe = Convert.ToString(exe);
+    if (s.TryGetValue("pc_menu", out var menu) && menu is bool hasMenu) c.PcMenu = hasMenu;
     c.Repo = Repo;
     c.ToolsRoot = Root;
     c.GameFiles.Clear();
@@ -171,6 +219,7 @@ sealed class Recomp {
   public RecompGame Detect(string path, out string label) {
     label = BootExecutable(path);
     if (label != null) return GameForDisc(label);
+    label = Ps5Title(path, out _);   // PS5 dump: matched below by the SHA-256 of sce_sys/param.json
     try {
       byte[] umd = ReadDiscFile(path, "UMD_DATA.BIN");
       if (umd != null) label = Encoding.ASCII.GetString(umd).Split('|')[0].Trim('\0', ' ');
