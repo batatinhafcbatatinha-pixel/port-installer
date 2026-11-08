@@ -140,7 +140,8 @@ static class DiscScanner {
 
   static bool IsExtractedDisc(string dir) =>
       File.Exists(Path.Combine(dir, "SYSTEM.CNF")) || Directory.Exists(Path.Combine(dir, "PSP_GAME")) ||
-      File.Exists(Path.Combine(dir, "default.xbe")) || File.Exists(Path.Combine(dir, "default.xex"));
+      File.Exists(Path.Combine(dir, "default.xbe")) || File.Exists(Path.Combine(dir, "default.xex")) ||
+      (File.Exists(Path.Combine(dir, "eboot.bin")) && File.Exists(Path.Combine(dir, "sce_sys", "param.json")));   // PS5 dump
 
   // One cache per recompiler; it starts over when the recompiler's games change (a new profile may match old discs).
   static string CacheFile(Recomp r) =>
@@ -210,13 +211,14 @@ static class Covers {
     if (serial != null) foreach (string ext in Exts) files.Add(Path.Combine(CacheDir, SafeName(serial) + ext));
     files.Add(Path.Combine(CacheDir, SafeName(key) + ".png"));
     if (gameDir != null) files.Add(Path.Combine(gameDir, "game_files", "PSP_GAME", "ICON0.PNG"));
+    if (gameDir != null) files.Add(Path.Combine(gameDir, "game_files", "sce_sys", "icon0.png"));
     foreach (string f in files) {
       if (f != null && File.Exists(f)) { var b = Thumb(f); if (b != null) return b; }
     }
-    // The disc's own icon (PSP: PSP_GAME/ICON0.PNG).
+    // The disc's own icon (PSP: PSP_GAME/ICON0.PNG; PS5 dump: sce_sys/icon0.png).
     if (disc != null) {
       try {
-        byte[] icon = Recomp.ReadDiscFile(disc, "PSP_GAME/ICON0.PNG");
+        byte[] icon = Recomp.ReadDiscFile(disc, "PSP_GAME/ICON0.PNG") ?? Recomp.ReadDiscFile(disc, "sce_sys/icon0.png");
         if (icon != null) {
           Directory.CreateDirectory(CacheDir);
           string f = Path.Combine(CacheDir, SafeName(serial ?? key) + ".png");

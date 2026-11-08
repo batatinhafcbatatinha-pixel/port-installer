@@ -30,5 +30,13 @@
     "folder": "PSPRecomp",
     "pt": "Jogos de PSP recompilados para PC (pasta profiles/ do repositório).",
     "en": "PSP games recompiled for PC (the repository's profiles/ folder)."
+  },
+  {
+    "name": "AnyPS5 (PlayStation 5)",
+    "repo": "batatinhafcbatatinha-pixel/AnyPS5",
+    "branch": "main",
+    "folder": "AnyPS5",
+    "pt": "Jogos de PlayStation 5 convertidos para programas do Windows (sem emulação) a partir do seu dump decriptado.",
+    "en": "PlayStation 5 games converted into Windows programs (no emulation) from your decrypted dump."
   }
 ]

@@ -151,7 +151,8 @@ sealed partial class MainForm {
     string ini = IniPath;
     bool ready = ini != null && Directory.Exists(Path.GetDirectoryName(ini));
     settingsNote.Text = ready
-        ? L.T("As mesmas opções do menu F1 do jogo, salvas em ", "The same options as the game's F1 menu, saved in ") + Path.GetFileName(ini) +
+        ? (cfg.PcMenu ? L.T("As mesmas opções do menu F1 do jogo, salvas em ", "The same options as the game's F1 menu, saved in ")
+                      : L.T("Opções do PC, salvas em ", "PC options, saved in ")) + Path.GetFileName(ini) +
           L.T(". O jogo usa estas opções quando abrir.", ". The game uses them when it starts.")
         : L.T("Dá para conferir as opções agora; para salvar, instale o jogo primeiro (as configurações ficam ao lado dele).",
               "You can look at the options now; to save them, install the game first (the settings are kept next to it).");
