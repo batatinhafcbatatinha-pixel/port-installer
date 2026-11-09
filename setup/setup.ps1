@@ -69,8 +69,13 @@ if (-not [Environment]::Is64BitOperatingSystem) { Fail 'A 64-bit Windows is requ
 $drive = Get-PSDrive -Name $Root.Substring(0, 1)
 $freeGB = [math]::Floor($drive.Free / 1GB)
 if (-not $Only -and $freeGB -lt $Setup.disk_gb) {
-  Say "Only $freeGB GB free on $($drive.Name):. About $($Setup.disk_gb) GB are needed here, plus about 7 GB on C: for the Build Tools." `
-      "So ha $freeGB GB livres em $($drive.Name):. Sao necessarios cerca de $($Setup.disk_gb) GB aqui, mais cerca de 7 GB no C: para o Build Tools." 'Yellow'
+  if ($Setup.buildtools -eq $false) {
+    Say "Only $freeGB GB free on $($drive.Name):. About $($Setup.disk_gb) GB are needed here." `
+        "So ha $freeGB GB livres em $($drive.Name):. Sao necessarios cerca de $($Setup.disk_gb) GB aqui." 'Yellow'
+  } else {
+    Say "Only $freeGB GB free on $($drive.Name):. About $($Setup.disk_gb) GB are needed here, plus about 7 GB on C: for the Build Tools." `
+        "So ha $freeGB GB livres em $($drive.Name):. Sao necessarios cerca de $($Setup.disk_gb) GB aqui, mais cerca de 7 GB no C: para o Build Tools." 'Yellow'
+  }
   if (-not (Ask 'Continue anyway?' 'Continuar mesmo assim?')) { Stop-Transcript | Out-Null; exit 1 }
 }
 
@@ -145,9 +150,13 @@ if ($LASTEXITCODE -ne 0) { Fail 'Downloading the build tools failed. Check your 
 $Tool = @{}
 foreach ($line in $toolLines) { if ($line -match '^(\w+)=(.*)$') { $Tool[$Matches[1]] = $Matches[2] } }
 # The C++ environment of the Build Tools, then the portable tools in front of it.
-if (-not $Only -and $VsPath) {
+# setup.json "buildtools": false with "llvm-mingw" in "tools": the compiler comes from .local\tools, nothing is installed.
+if (-not $Only) {
+if ($VsPath) {
 $vcvars = Join-Path $VsPath 'VC\Auxiliary\Build\vcvars64.bat'
 foreach ($line in (cmd /c "`"$vcvars`" >nul && set")) { if ($line -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] } }
+}
+if ($Tool['CC']) { $env:CC = $Tool['CC']; $env:CXX = $Tool['CXX'] }
 $front = @($Tool['PATH'] -split ';' | Where-Object { $_ })
 if ($Tool['JAVA_HOME']) { $env:JAVA_HOME = $Tool['JAVA_HOME']; $front += (Join-Path $Tool['JAVA_HOME'] 'bin') }
 if ($Tool['GHIDRA']) { $env:GHIDRA = $Tool['GHIDRA'] }

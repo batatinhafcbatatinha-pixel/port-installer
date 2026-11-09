@@ -1126,15 +1126,15 @@ sealed partial class MainForm : Form {
     string msg = L.T(
         "O instalador vai:\n\n" +
         (root == null ? "•  baixar o kit do port do GitHub (só código-fonte, cerca de 1 MB)\n" : "") +
-        "•  instalar o Python e o Microsoft C++ Build Tools se faltarem (o Build Tools tem cerca de 7 GB e pede permissão de administrador)\n" +
-        "•  baixar as ferramentas de compilação\n" +
+        (cfg.BuildToolsGb > 0 ? "•  instalar o Python e o Microsoft C++ Build Tools se faltarem (o Build Tools tem cerca de 7 GB e pede permissão de administrador)\n" : "") +
+        "•  baixar as ferramentas de compilação que ainda não estiverem na pasta\n" +
         (source != null ? $"•  copiar os arquivos do jogo de {source}\n" : $"•  pedir o seu disco ({cfg.Disc}) ou a imagem .iso\n") +
         $"•  montar a versão para PC (cerca de {cfg.Minutes} minutos)\n\n" +
         $"Pasta: {target}",
         "The installer will:\n\n" +
         (root == null ? "•  download the port kit from GitHub (source code only, about 1 MB)\n" : "") +
-        "•  install Python and the Microsoft C++ Build Tools if missing (the Build Tools are about 7 GB and ask for administrator permission)\n" +
-        "•  download the build tools\n" +
+        (cfg.BuildToolsGb > 0 ? "•  install Python and the Microsoft C++ Build Tools if missing (the Build Tools are about 7 GB and ask for administrator permission)\n" : "") +
+        "•  download the build tools not in the folder yet\n" +
         (source != null ? $"•  copy the game files from {source}\n" : $"•  ask for your disc ({cfg.Disc}) or its .iso image\n") +
         $"•  build the PC version (about {cfg.Minutes} minutes)\n\n" +
         $"Folder: {target}");
