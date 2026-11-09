@@ -1,7 +1,7 @@
 """Portable build tools and missing project parts for Setup.cmd, pinned and SHA-256 checked.
 
 Reads setup.json in the port folder (the repository root, or --root: one game's folder of a recompiler repository):
-- "tools": any of llvm, cmake, ninja, ghidra (Ghidra + the PS2 extension + a Java 21 JDK), downloaded into
+- "tools": any of llvm, llvm-mingw, cmake, ninja, ghidra (Ghidra + the PS2 extension + a Java 21 JDK), downloaded into
   .local/tools; nothing is installed system-wide. A complete Clang 20+ already installed is used instead.
 - "submodules": {path: {"url", "commit"}}; a ZIP download has these folders empty. With Git they are checked
   out; without it the pinned commit's archive is downloaded.
@@ -29,6 +29,12 @@ TOOLS = {
     'llvm': {
         'version': '22.1.2', 'sha256': '6550bcc308bf972f7f956001b73f6478da3d22f1ebd4b01653c978a6c7ff3698',
         'url': GH + 'llvm/llvm-project/releases/download/llvmorg-22.1.2/clang+llvm-22.1.2-x86_64-pc-windows-msvc.tar.xz',
+        'check': 'bin/clang++.exe',
+    },
+    'llvm-mingw': {  # Clang + lld + mingw-w64 (headers and libraries, Direct3D and XAudio included): a whole
+        # Windows C/C++ toolchain that may be redistributed, so it replaces the Microsoft C++ Build Tools.
+        'version': '20261020', 'sha256': 'fd5462b7f5d93b2ff981fcd3f9c7e427e47f3203c64ea91c27bcc444eebd74cd',
+        'url': GH + 'mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-ucrt-x86_64.zip',
         'check': 'bin/clang++.exe',
     },
     'cmake': {
@@ -220,6 +226,10 @@ def main():
         llvm = existing_llvm() or ensure('llvm', base / f'llvm-{TOOLS["llvm"]["version"]}')
         path.append(llvm / 'bin')
         result['LLVM'] = llvm
+    if 'llvm-mingw' in wanted:
+        mingw = ensure('llvm-mingw', base / f'llvm-mingw-{TOOLS["llvm-mingw"]["version"]}')
+        path.append(mingw / 'bin')
+        result['CC'], result['CXX'] = 'clang', 'clang++'
     for name in ('cmake', 'ninja'):
         if name in wanted:
             folder = ensure(name, base / f'{name}-{TOOLS[name]["version"]}')
