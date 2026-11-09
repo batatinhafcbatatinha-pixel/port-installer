@@ -11,7 +11,8 @@ Nothing from any game is in this repository or in its releases: the game always 
 1. Get the launcher, either way:
    - from a [release](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases), the ZIP of a recompiler
      (`PS2Recomp.zip`, `xboxrecomp.zip`, `rexglue-ports.zip`, `PSPRecomp.zip`, `AnyPS5.zip`): unzip it and open `Launcher.exe`
-     at its root. Python, CMake and Ninja are already inside (`.local/`); or
+     at its root. Python, CMake and Ninja are already inside (`.local/`), and for PS2Recomp and PSPRecomp the
+     compiler too (llvm-mingw: Clang + mingw-w64), so nothing from Microsoft has to be installed; or
    - `Launcher.zip` alone: open `Launcher.exe` and get recompilers from **Recompilers** (toolbar or Ctrl+R).
    - Developers: `git clone --recurse-submodules` a recompiler and run `Launcher.cmd`.
 2. The library starts empty. Click **ADD A GAME FOLDER** and pick one or more folders with your discs (`.iso` images or
