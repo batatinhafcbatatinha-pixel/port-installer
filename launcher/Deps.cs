@@ -78,7 +78,7 @@ sealed partial class MainForm {
     string kit = root;
     var results = await Task.Run(() => {
       var r = new List<KeyValuePair<bool, string>>();
-      r.Add(FindPython());
+      r.Add(FindPython(cfg.ToolsRoot));
       if (cfg.BuildToolsGb > 0) r.Add(FindBuildTools());
       string systemLlvm = SystemLlvm();
       foreach (var t in cfg.Tools) {
@@ -203,7 +203,10 @@ sealed partial class MainForm {
     } catch (Exception) { return null; }
   }
 
-  static KeyValuePair<bool, string> FindPython() {
+  static KeyValuePair<bool, string> FindPython(string recompRoot) {
+    // The Python that comes inside the launcher ZIP.
+    if (recompRoot != null && File.Exists(Path.Combine(recompRoot, ".local", "python", "python.exe")))
+      return new KeyValuePair<bool, string>(true, L.T("Python (incluído)", "Python (included)"));
     const string probe = "-c \"import sys, tkinter; assert sys.version_info >= (3, 11); print('%d.%d' % sys.version_info[:2])\"";
     foreach (var c in new[] { new[] { "py", "-3 " }, new[] { "python", "-B " } }) {
       string v = Run(c[0], c[1] + probe);

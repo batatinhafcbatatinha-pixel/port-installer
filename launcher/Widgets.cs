@@ -197,6 +197,53 @@ sealed class ViewSwitch : Control {
   }
 }
 
+// The console tabs above the library: "All" and one tab per console that has games, each with its count.
+sealed class ConsoleTabs : Control {
+  public sealed class Tab { public string Id, Text; public int Count; }
+  public List<Tab> Tabs = new List<Tab>();
+  public string Selected;
+  int hover = -1;
+  readonly List<Rectangle> rects = new List<Rectangle>();
+  public event EventHandler Changed;
+
+  public ConsoleTabs() {
+    SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+    Height = 44; Dock = DockStyle.Top; Cursor = Cursors.Hand;
+  }
+  float K => DeviceDpi / 96f;
+  public void Set(List<Tab> tabs, string selected) { Tabs = tabs; Selected = tabs.Any(t => t.Id == selected) ? selected : null; Invalidate(); }
+  int HitTest(Point p) { for (int i = 0; i < rects.Count; ++i) if (rects[i].Contains(p)) return i; return -1; }
+  protected override void OnMouseMove(MouseEventArgs e) { int h = HitTest(e.Location); if (h != hover) { hover = h; Invalidate(); } base.OnMouseMove(e); }
+  protected override void OnMouseLeave(EventArgs e) { hover = -1; Invalidate(); base.OnMouseLeave(e); }
+  protected override void OnMouseDown(MouseEventArgs e) {
+    int h = HitTest(e.Location);
+    if (h >= 0 && h < Tabs.Count && Tabs[h].Id != Selected) { Selected = Tabs[h].Id; Invalidate(); Changed?.Invoke(this, EventArgs.Empty); }
+    base.OnMouseDown(e);
+  }
+  protected override void OnPaint(PaintEventArgs e) {
+    var g = e.Graphics;
+    g.Clear(Theme.Bg);
+    Theme.Smooth(g);
+    rects.Clear();
+    var font = Theme.Semi(10f);
+    float x = 18 * K;
+    for (int i = 0; i < Tabs.Count; ++i) {
+      var t = Tabs[i];
+      string text = t.Text + "  " + t.Count;
+      var size = TextRenderer.MeasureText(g, text, font);
+      var r = new Rectangle((int)x, 0, size.Width + (int)(20 * K), Height);
+      rects.Add(r);
+      bool on = t.Id == Selected;
+      if (hover == i && !on) using (var path = Theme.Round(new RectangleF(r.X, 6 * K, r.Width, Height - 14 * K), 6 * K)) using (var b = new SolidBrush(Theme.Hover)) g.FillPath(b, path);
+      TextRenderer.DrawText(g, text, font, new Rectangle(r.X, 0, r.Width, Height - (int)(3 * K)), on ? Theme.Text : Theme.Text3,
+                            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+      if (on) using (var b = new SolidBrush(Theme.Accent)) g.FillRectangle(b, r.X + 8 * K, Height - 3 * K, r.Width - 16 * K, 3 * K);
+      x += r.Width + 4 * K;
+    }
+    using (var p = new Pen(Theme.Border)) g.DrawLine(p, 0, Height - 1, Width, Height - 1);
+  }
+}
+
 // A rounded search field with a magnifier and a hint.
 sealed class SearchBox : Control {
   public readonly TextBox Box = new TextBox { BorderStyle = BorderStyle.None };
@@ -275,23 +322,29 @@ sealed class InfoBar : Panel {
 
 // ---------------------------------------------------------------------- the library
 
-enum EntryState { Ready, HasDisc, NoDisc, NoProfile, Kit }
+enum EntryState { Ready, HasDisc, NoDisc, NoProfile, Kit, NeedsRecomp, Unsupported }
 
 sealed class GameEntry {
-  public string Key, Name, Serial, Disc, Dir, Platform;
+  public string Key, Name, Serial, Disc, Dir, Platform, Console;
   public RecompGame Game;          // null: a disc without a profile, or the single game of a kit
+  public Recomp Recomp;            // the installed recompiler of the game's console
+  public KnownRecomp Known;        // the recompiler of the game's console (installed or not)
   public bool Installed;
-  public bool NoProfile;
+  public bool NoProfile;           // the recompiler has no profile but can try its generic path
+  public bool NeedsRecomp;         // the console's recompiler is not on this PC yet
+  public bool Unsupported;         // the recompiler has neither a profile nor a generic path for it
   public Bitmap Cover;
   public bool CoverDone;
 
-  public EntryState State => NoProfile ? EntryState.NoProfile : Installed ? EntryState.Ready : Disc != null ? EntryState.HasDisc : Dir == null ? EntryState.Kit : EntryState.NoDisc;
+  public EntryState State => NeedsRecomp ? EntryState.NeedsRecomp : Unsupported ? EntryState.Unsupported : NoProfile ? EntryState.NoProfile : Installed ? EntryState.Ready : Disc != null ? EntryState.HasDisc : Dir == null ? EntryState.Kit : EntryState.NoDisc;
   public string StateText {
     get {
       switch (State) {
         case EntryState.Ready: return L.T("Pronto para jogar", "Ready to play");
         case EntryState.HasDisc: return L.T("Disco encontrado", "Disc found");
-        case EntryState.NoProfile: return L.T("Sem perfil", "No profile");
+        case EntryState.NoProfile: return L.T("Experimental", "Experimental");
+        case EntryState.NeedsRecomp: return L.T("Baixar recompilador", "Get recompiler");
+        case EntryState.Unsupported: return L.T("Ainda sem suporte", "Not supported yet");
         case EntryState.Kit: return L.T("Não instalado", "Not installed");
         default: return L.T("Sem disco", "No disc");
       }
@@ -303,6 +356,7 @@ sealed class GameEntry {
         case EntryState.Ready: return Theme.Accent;
         case EntryState.HasDisc: return Theme.Blue;
         case EntryState.NoProfile: return Theme.Warn;
+        case EntryState.NeedsRecomp: return Theme.Link;
         default: return Theme.Text3;
       }
     }
@@ -339,6 +393,9 @@ sealed class GameLibrary : Control {
   public bool Grid { get => grid; set { grid = value; Relayout(); } }
   public int TileSize { get => tileSize; set { tileSize = Math.Max(0, Math.Min(2, value)); Relayout(); } }
   public string Filter { get => filter; set { filter = value ?? ""; Rebuild(); } }
+  string console;                 // the console tab (null: every console)
+  public string Console { get => console; set { console = value; Rebuild(); } }
+  public int CountFor(string c) => all.Count(x => c == null || x.Console == c);
 
   public void SetEntries(List<GameEntry> entries, string selectKey) {
     all = entries;
@@ -347,10 +404,18 @@ sealed class GameLibrary : Control {
     Select(pick, true);
   }
 
-  public void SelectKey(string key) { var e = all.FirstOrDefault(x => x.Key == key); if (e != null) { if (!view.Contains(e)) Filter = ""; Select(e, true); } }
+  public void SelectKey(string key) {
+    var e = all.FirstOrDefault(x => x.Key == key);
+    if (e == null) return;
+    if (!view.Contains(e) && console != null && e.Console != console) { console = null; ConsoleReset?.Invoke(this, EventArgs.Empty); }
+    if (!view.Contains(e)) Filter = "";
+    Select(e, true);
+  }
+  public event EventHandler ConsoleReset;
 
   void Rebuild() {
     IEnumerable<GameEntry> q = all;
+    if (console != null) q = q.Where(x => x.Console == console);
     if (filter.Trim().Length > 0) {
       string f = filter.Trim();
       q = q.Where(x => (x.Name ?? "").IndexOf(f, StringComparison.CurrentCultureIgnoreCase) >= 0 ||

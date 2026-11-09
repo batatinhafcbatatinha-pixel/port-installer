@@ -253,7 +253,7 @@ sealed class Recomp {
 
   // A file (up to 16 MB) of an extracted folder or of an ISO 9660 image with 2048-byte sectors; null when missing.
   // A file of an Xbox / Xbox 360 disc image (XDVDFS): plain XISO or a full XGD1/2/3 image; null when not XDVDFS.
-  static byte[] XdvdfsFile(string iso, string rel) {
+  static byte[] XdvdfsFile(string iso, string rel, bool probe = false) {
     using (var f = File.OpenRead(iso)) {
       long[] partitions = { 0, 0x18300000, 0x0FD90000, 0x02080000 };
       var vd = new byte[2048];
@@ -291,7 +291,9 @@ sealed class Recomp {
           }
           if (!found) return null;
         }
-        if (isDir || size > (16u << 20)) return null;
+        if (isDir) return null;
+        if (probe) return new byte[0];
+        if (size > (16u << 20)) return null;
         var data = new byte[size];
         f.Seek(part + (long)sector * 2048, SeekOrigin.Begin);
         int got = 0;
@@ -302,13 +304,17 @@ sealed class Recomp {
     return null;
   }
 
-  public static byte[] ReadDiscFile(string disc, string rel) {
+  // Whether a disc image or extracted folder has the file, whatever its size.
+  public static bool DiscHas(string disc, string rel) => ReadDiscFile(disc, rel, true) != null;
+
+  public static byte[] ReadDiscFile(string disc, string rel, bool probe = false) {
     if (Directory.Exists(disc)) {
       string f = Path.Combine(disc, rel.Replace('/', Path.DirectorySeparatorChar));
+      if (probe) return File.Exists(f) ? new byte[0] : null;
       return File.Exists(f) && new FileInfo(f).Length <= (16 << 20) ? File.ReadAllBytes(f) : null;
     }
     if (!File.Exists(disc)) return null;
-    byte[] xbox = XdvdfsFile(disc, rel);
+    byte[] xbox = XdvdfsFile(disc, rel, probe);
     if (xbox != null) return xbox;
     using (var f = File.OpenRead(disc)) {
       var pvd = new byte[2048];
@@ -338,6 +344,7 @@ sealed class Recomp {
         }
         if (!found) return null;
       }
+      if (probe) return new byte[0];
       if (size > (16u << 20)) return null;
       var data = new byte[size];
       f.Seek((long)lba * 2048, SeekOrigin.Begin);
@@ -350,7 +357,7 @@ sealed class Recomp {
 
 // The recompilers this launcher can download when it runs on its own (recomps.json inside the exe).
 sealed class KnownRecomp {
-  public string Name, Repo, Branch, Folder, Pt, En;
+  public string Id, Console, Name, Repo, Branch, Folder, Pt, En;
 
   public static List<KnownRecomp> List() {
     var list = new List<KnownRecomp>();
@@ -361,6 +368,8 @@ sealed class KnownRecomp {
         foreach (var o in items ?? new object[0])
           if (o is IDictionary<string, object> d)
             list.Add(new KnownRecomp {
+              Id = d.TryGetValue("id", out var id) ? Convert.ToString(id) : Convert.ToString(d["folder"]),
+              Console = d.TryGetValue("console", out var con) ? Convert.ToString(con) : null,
               Name = Convert.ToString(d["name"]), Repo = Convert.ToString(d["repo"]),
               Branch = d.TryGetValue("branch", out var b) ? Convert.ToString(b) : "main",
               Folder = d.TryGetValue("folder", out var f) ? Convert.ToString(f) : Convert.ToString(d["name"]),

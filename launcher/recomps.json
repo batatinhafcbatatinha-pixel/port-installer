@@ -1,5 +1,7 @@
 [
   {
+    "id": "ps2recomp",
+    "console": "ps2",
     "name": "PS2Recomp (PlayStation 2)",
     "repo": "batatinhafcbatatinha-pixel/PS2Recomp",
     "branch": "main",
@@ -8,6 +10,8 @@
     "en": "PlayStation 2 games recompiled for PC (the repository's games/ folder)."
   },
   {
+    "id": "xboxrecomp",
+    "console": "xbox",
     "name": "xboxrecomp (Xbox original)",
     "repo": "batatinhafcbatatinha-pixel/xboxrecomp",
     "branch": "ports",
@@ -16,6 +20,8 @@
     "en": "Original Xbox games recompiled for PC (the repository's games/ folder)."
   },
   {
+    "id": "rexglue-ports",
+    "console": "x360",
     "name": "rexglue-ports (Xbox 360)",
     "repo": "batatinhafcbatatinha-pixel/rexglue-ports",
     "branch": "main",
@@ -24,6 +30,8 @@
     "en": "Xbox 360 games recompiled for PC with ReXGlue (the repository's games/ folder)."
   },
   {
+    "id": "psprecomp",
+    "console": "psp",
     "name": "PSPRecomp (PSP)",
     "repo": "batatinhafcbatatinha-pixel/PSPRecomp",
     "branch": "main",
@@ -32,6 +40,8 @@
     "en": "PSP games recompiled for PC (the repository's profiles/ folder)."
   },
   {
+    "id": "anyps5",
+    "console": "ps5",
     "name": "AnyPS5 (PlayStation 5)",
     "repo": "batatinhafcbatatinha-pixel/AnyPS5",
     "branch": "main",
