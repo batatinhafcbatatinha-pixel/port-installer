@@ -316,7 +316,9 @@ sealed partial class MainForm : Form {
 
     var config = MenuTop(L.T("Configurações", "Settings"),
         Item(L.T("Configurações do PC...", "PC settings..."), ShowSettings, Keys.Control | Keys.P),
-        Item(L.T("Dependências...", "Dependencies..."), ShowDeps, Keys.Control | Keys.D));
+        Item(L.T("Dependências...", "Dependencies..."), ShowDeps, Keys.Control | Keys.D),
+        Sep(),
+        LanguageMenu());
 
     var sizes = new[] { L.T("Pequenas", "Small"), L.T("Médias", "Medium"), L.T("Grandes", "Large") };
     var sizeMenu = new ToolStripMenuItem(L.T("Tamanho das capas", "Cover size")) { ForeColor = Theme.Text };
@@ -375,6 +377,26 @@ sealed partial class MainForm : Form {
             "Installs, builds and starts games recompiled for PC from your own disc. Nothing from any game is downloaded or uploaded: only the recompilers' source code.\n\n") +
         "github.com/" + Updater.LauncherRepo + "\n" +
         L.T("Canal: ", "Channel: ") + (Updater.Channel == UpdateChannel.Nightly ? "nightly" : L.T("estável", "stable")));
+  }
+
+  ToolStripMenuItem LanguageMenu() {
+    var langMenu = new ToolStripMenuItem(L.T("Idioma (Language)", "Language (Idioma)")) { ForeColor = Theme.Text };
+    foreach (var t in new[] { new[] { "system", L.T("Igual ao Windows", "Same as Windows") }, new[] { "pt", "Português" }, new[] { "en", "English" } }) {
+      string mode = t[0];
+      var it = new ToolStripMenuItem(t[1]) { ForeColor = Theme.Text, Checked = L.Mode == mode };
+      it.Click += (s, e) => SetLanguage(mode);
+      langMenu.DropDownItems.Add(it);
+    }
+    return langMenu;
+  }
+
+  void SetLanguage(string mode) {
+    if (mode == L.Mode) return;
+    if (Busy) { Dialog.Info(this, Text, L.T("Espere terminar para trocar o idioma.", "Wait for it to finish before changing the language.")); return; }
+    L.Set(mode);
+    NextGame = Current?.Key ?? game?.Id;
+    Restart = true;
+    Close();
   }
 
   void SetTheme(string mode) {

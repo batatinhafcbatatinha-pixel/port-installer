@@ -24,9 +24,12 @@ static class Program {
     Theme.Load();
     Updater.CleanUp();
     // Test aid: --shot <file.png> [tab index] draws the window into a PNG and exits (no clicks needed);
-    // --theme dark|light overrides the saved theme for that run.
+    // --theme dark|light overrides the saved theme for that run; --lang pt|en the language.
     string themeArg = Arg(args, "--theme");
     if (themeArg != null) Theme.Apply(themeArg);
+    // --lang pt|en shows that language for this run only (the saved choice stays).
+    string langArg = Arg(args, "--lang");
+    if (langArg == "pt" || langArg == "en") { L.Mode = langArg; L.Pt = langArg == "pt"; }
     string shotFile = Arg(args, "--shot");
     int shotTab = int.TryParse(Arg(args, "--shot-tab"), out int t) ? t : 0;
 

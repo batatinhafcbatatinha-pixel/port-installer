@@ -116,7 +116,13 @@ sealed class GameConfig {
 }
 
 static class L {
-  public static readonly bool Pt = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pt";
+  // Language: "system" follows Windows (Portuguese when Windows is in Portuguese, English for every other
+  // language), or "pt" / "en" chosen in Settings > Language. Changing it rebuilds the window.
+  public static string Mode = Load();
+  public static bool Pt = Resolve(Mode);
+  static string Load() { string m = Prefs.Text("language", "system"); return m == "pt" || m == "en" ? m : "system"; }
+  static bool Resolve(string m) => m == "pt" || (m == "system" && CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pt");
+  public static void Set(string m) { Mode = m; Pt = Resolve(m); Prefs.Set("language", m); }
   public static string T(string pt, string en) => Pt ? pt : en;
   public static string T(Setting s) => Pt ? s.Pt : s.En;
   public static string T(Choice c) => Pt ? c.Pt : c.En;
