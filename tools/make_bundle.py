@@ -40,7 +40,7 @@ def fetch(url, sha256=None):
     if curl:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / 'download'
-            cmd = [curl, '-sL', '--fail', '--retry', '5', '--retry-all-errors', '--retry-delay', '5', '-A', 'port-bundle', '-o', str(out), url]
+            cmd = [curl, '-sL', '--fail', '--retry', '10', '--retry-all-errors', '--retry-delay', '15', '-A', 'port-bundle', '-o', str(out), url]
             if subprocess.run(cmd).returncode != 0:
                 raise OSError(f'{url}: download failed')
             data = out.read_bytes()
@@ -104,10 +104,19 @@ def add_python(stage, archive=None):
 
 
 def add_tools(stage, names):
+    # The pins of setup_tools.py, fetched with fetch()'s patient retries (GitHub release downloads answer 504 at times).
     base = stage / '.local' / 'tools'
     base.mkdir(parents=True, exist_ok=True)
     for name in names:
-        setup_tools.ensure(name, base / f'{name}-{setup_tools.TOOLS[name]["version"]}')
+        tool = setup_tools.TOOLS[name]
+        folder = base / f'{name}-{tool["version"]}'
+        archive = base / Path(tool['url'].replace('%2B', '+')).name
+        print(f'{name} {tool["version"]}')
+        archive.write_bytes(fetch(tool['url'], tool['sha256']))
+        setup_tools.extract(archive, folder)
+        archive.unlink()
+        if not (folder / tool['check']).is_file():
+            raise ValueError(f'{name}: {tool["check"]} missing after unpacking')
 
 
 def main():
