@@ -22,7 +22,16 @@ Nothing from any game is in this repository or in its releases: the game always 
    A disc whose recompiler is not on the PC offers to download it; one the recompiler has no profile for is listed as
    experimental (generic path) or not supported yet. **INSTALL AND BUILD** copies and checks the game files, translates and
    compiles the game. It takes one to several hours the first time; finished steps are skipped when you run it again.
-3. **PLAY**. The **PC settings** tab holds the same options as the in-game F1 menu.
+3. **Patches and cheats** (Game menu or **More...**): entries from the emulator communities' repositories or any
+   GitHub repository you add: [PCSX2/pcsx2_patches](https://github.com/PCSX2/pcsx2_patches) (PS2, matched by serial and
+   the boot executable's CRC), [CWCheat Database Plus](https://github.com/Saramagrean/CWCheat-Database-Plus-) (PSP),
+   [xenia-canary/game-patches](https://github.com/xenia-canary/game-patches) (Xbox 360),
+   [PS4-PS5-Game-Patch](https://github.com/illusion0001/PS4-PS5-Game-Patch) and
+   [GoldHEN_Cheat_Repository](https://github.com/GoldHEN/GoldHEN_Cheat_Repository) (PS5). For PS2 games **Apply** writes
+   `patches.pnach` / `cheats.pnach` next to the game and runs `tools/ps2port hotpatch`: a patch that changes code
+   retranslates only that function into a small library (seconds, no rebuild), the rest are memory writes the runtime
+   makes at boot or every frame. Other recompilers keep the choice until they apply it.
+4. **PLAY**. The **PC settings** tab holds the same options as the in-game F1 menu.
 
 The window works like an emulator's game list: a menu bar, a toolbar (open ISO, game folders, refresh, play, stop,
 install, settings, dependencies, log), the library as a list or a grid of covers with search and sorting, the selected

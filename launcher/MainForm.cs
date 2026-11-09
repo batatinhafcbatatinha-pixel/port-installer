@@ -155,7 +155,7 @@ sealed partial class MainForm : Form {
     PlaceEmpty();
   }
 
-  // Test aid (--shot): 0 library, 1 dependencies, 2 log, 3 PC settings, 4 list view, 5 recompilers.
+  // Test aid (--shot): 0 library, 1 dependencies, 2 log, 3 PC settings, 4 list view, 5 recompilers, 6 patches, 7 cheats.
   public void ShotOnLoad(string file, int tab) {
     shotFile = file;
     Shown += (o, e) => {
@@ -163,6 +163,25 @@ sealed partial class MainForm : Form {
       if (tab == 2) { SetLogVisible(true); AppendLog("== 2/5 " + L.T("Exemplo de etapa", "Example step")); }
       if (tab == 4) library.Grid = false;
       if (tab == 5) { var rd = new RecompsDialog(registry); rd.Show(this); target = rd; }
+      if (tab == 6 || tab == 7) {
+        // After the folder scan (the game must be in the library): open the window, picture it 12 s later.
+        var opener = new System.Windows.Forms.Timer { Interval = 6000 };
+        opener.Tick += (t, a) => {
+          opener.Stop();
+          if (Current?.Game == null) { Close(); return; }
+          var pd = new PatchesDialog(tab == 6 ? PatchKind.Patch : PatchKind.Cheat, PatchGameOf(Current), Current.Game.Dir, Current.Recomp.Name);
+          pd.Show(this);
+          var shot = new System.Windows.Forms.Timer { Interval = 12000 };
+          shot.Tick += (t2, a2) => {
+            shot.Stop();
+            using (var bmp = new Bitmap(pd.Width, pd.Height)) { pd.DrawToBitmap(bmp, new Rectangle(0, 0, pd.Width, pd.Height)); bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png); }
+            Close();
+          };
+          shot.Start();
+        };
+        opener.Start();
+        return;
+      }
       if (tab == 1 || tab == 3) {
         var dlg = tab == 1 ? OpenDepsDialog() : OpenSettingsDialog();
         dlg.Show(this);
@@ -403,6 +422,13 @@ sealed partial class MainForm : Form {
     var disc = Item(L.T("Escolher o disco deste jogo...", "Choose this game's disc..."), () => ChooseDisc(e));
     disc.Enabled = selected && !busy && Lib && e.Game != null;
     list.Add(disc);
+    var patches = Item(L.T("Patches...", "Patches..."), () => ShowPatches(PatchKind.Patch));
+    patches.Enabled = selected && !busy && Lib && e.Game != null;
+    list.Add(patches);
+    var cheats = Item(L.T("Cheats...", "Cheats..."), () => ShowPatches(PatchKind.Cheat));
+    cheats.Enabled = patches.Enabled;
+    list.Add(cheats);
+    list.Add(Sep());
     var cover = Item(L.T("Escolher capa...", "Choose cover..."), ChooseCover);
     cover.Enabled = selected;
     list.Add(cover);
@@ -718,8 +744,9 @@ sealed partial class MainForm : Form {
     }
     foreach (var e in entries)
       if (old.TryGetValue(e.Key + "|" + e.Disc, out var prev)) { e.Cover = prev.Cover; e.CoverDone = prev.CoverDone; }
-    library.SetEntries(entries, Current?.Key ?? startKey ?? (Prefs.Text("last_game", "") is var lg && lg.Length > 0 ? lg : null) ?? "kit");
-    startKey = null;
+    // A game asked for (--game, a shortcut) stays wanted until a scan finds it.
+    library.SetEntries(entries, startKey ?? Current?.Key ?? (Prefs.Text("last_game", "") is var lg && lg.Length > 0 ? lg : null) ?? "kit");
+    if (startKey != null && entries.Any(x => x.Key == startKey)) startKey = null;
     if (Lib) {
       var list = new List<ConsoleTabs.Tab> { new ConsoleTabs.Tab { Id = null, Text = L.T("Todos", "All"), Count = entries.Count } };
       foreach (string c in Consoles.Order) {

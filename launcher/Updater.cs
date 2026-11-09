@@ -62,7 +62,7 @@ static class Updater {
     return web;
   }
 
-  static IDictionary<string, object> Api(string path) {
+  internal static IDictionary<string, object> Api(string path) {
     using (var web = Web())
       return new JavaScriptSerializer().DeserializeObject(web.DownloadString("https://api.github.com/" + path)) as IDictionary<string, object>;
   }
