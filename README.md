@@ -8,14 +8,18 @@ Nothing from any game is in this repository or in its releases: the game always 
 
 ## Play a game (recompilers)
 
-1. Get a recompiler, either way:
-   - clone it: `git clone --recurse-submodules https://github.com/batatinhafcbatatinha-pixel/PS2Recomp.git` and run `Launcher.cmd`
-     at its root (it downloads `Launcher.exe` from the [releases](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases)), or
-   - download only `Launcher.exe` from the [releases](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases) and run it:
-     it asks for a folder and downloads the recompiler's source there.
-2. Click **CHOOSE ISO...** and pick your disc image. The game is recognised from the disc (PS2: `SYSTEM.CNF`; PSP and Xbox:
-   SHA-256 of the small files listed in the game's `installer.json`, read from ISO 9660 or XDVDFS); the launcher then
-   installs what is missing (Python, C++ Build Tools, CMake, Ninja, Ghidra), copies and checks the game files, translates and
+1. Get the launcher, either way:
+   - from a [release](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases), the ZIP of a recompiler
+     (`PS2Recomp.zip`, `xboxrecomp.zip`, `rexglue-ports.zip`, `PSPRecomp.zip`, `AnyPS5.zip`): unzip it and open `Launcher.exe`
+     at its root. Python, CMake and Ninja are already inside (`.local/`); or
+   - `Launcher.zip` alone: open `Launcher.exe` and get recompilers from **Recompilers** (toolbar or Ctrl+R).
+   - Developers: `git clone --recurse-submodules` a recompiler and run `Launcher.cmd`.
+2. The library starts empty. Click **ADD A GAME FOLDER** and pick one or more folders with your discs (`.iso` images or
+   extracted discs; subfolders are searched too). Each disc's console is recognised (PS2 `SYSTEM.CNF`, PSP `UMD_DATA.BIN`,
+   Xbox `default.xbe`, Xbox 360 `default.xex`, PS5 dump `sce_sys/param.json`) and then its game (PS2 boot file; others:
+   SHA-256 of the small files in the game's `installer.json`). Games are split in tabs: **All**, PS2, Xbox, Xbox 360, PSP, PS5.
+   A disc whose recompiler is not on the PC offers to download it; one the recompiler has no profile for is listed as
+   experimental (generic path) or not supported yet. **INSTALL AND BUILD** copies and checks the game files, translates and
    compiles the game. It takes one to several hours the first time; finished steps are skipped when you run it again.
 3. **PLAY**. The **PC settings** tab holds the same options as the in-game F1 menu.
 
@@ -46,7 +50,8 @@ needed (setup.json `"buildtools": false`). The PC settings become AnyPS5 variabl
 
 | Path | What |
 | --- | --- |
-| `launcher/` | `Launcher.exe` source (C#, .NET Framework 4.8, built by CI). Recompiler mode: finds `launcher.json` with `games_dir` in its folder or a parent (or `--root`), lists `games/*/setup.json`, `--game <id>` opens one. Kit mode: `launcher.json` next to it or built in. Alone: downloads a recompiler from `recomps.json`. |
+| `launcher/` | `Launcher.exe` source (C#, .NET Framework 4.8, built by CI). Recompiler mode: finds `launcher.json` with `games_dir` in its folder or a parent (or `--root`), lists `games/*/setup.json`, `--game <id>` opens one. Kit mode: `launcher.json` next to it or built in. Library mode: one library for every recompiler installed (`%APPDATA%\port-launcher\recomps.txt`, the one it sits in added by itself; more from `recomps.json` in the Recompilers window). |
+| `tools/make_bundle.py` | Builds a recompiler's player ZIP: source + `Launcher.exe` + Python (python-build-standalone, pinned) + CMake/Ninja (pins of `setup/setup_tools.py`). CI runs it for every recompiler on a `v*` tag. |
 | `setup/setup.ps1`, `setup/setup_tools.py` | The install and build steps (shared by every port). `-GameDir` = one game folder, `-ToolsDir` = shared tools, `-Source` = the disc image; `-Only python\|buildtools\|tools\|game`. |
 | `installer.py`, `engine.py`, `media.py`, `layout.py` | Game-file installer: ISO 9660 (PS2) and XDVDFS (Xbox/360) or a folder, SHA-256 check against `installer.json`, progress, resume. `--source` starts at once. |
 | `prepare_folder.py` | Sector layout for an extracted folder (`game_files/.disc/`), used by the PS2 runtime instead of an ISO. |

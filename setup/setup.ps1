@@ -77,6 +77,10 @@ if (-not $Only -and $freeGB -lt $Setup.disk_gb) {
 # 1. Python (with Tk for the game-file installer)
 Step '1/5 Python' '1/5 Python'
 function Find-Python {
+  # The Python inside a launcher ZIP (<recompiler>/.local/python) comes first: nothing to install.
+  foreach ($b in @($(if ($ToolsDir) { Join-Path (Split-Path -Parent $ToolsDir) 'python\python.exe' }), (Join-Path $Root '.local\python\python.exe'))) {
+    if ($b -and (Test-Path -LiteralPath $b)) { return $b }
+  }
   foreach ($c in @(@('py', '-3'), @('python', '-B'))) {
     if (-not (Get-Command $c[0] -ErrorAction SilentlyContinue)) { continue }
     $exe = & $c[0] $c[1] -c "import sys, tkinter; assert sys.version_info >= (3, 11); print(sys.executable)" 2>$null

@@ -23,6 +23,12 @@ sealed partial class MainForm : Form {
   // Recompiler mode (games/<game> of PS2Recomp, xboxrecomp...): the repository and the selected game; null for a single-game kit.
   Recomp recomp;
   RecompGame game;
+  // Library mode: every installed recompiler (null for a single-game kit).
+  RecompRegistry registry;
+  bool Lib => registry != null;
+  ConsoleTabs tabs;
+  FlatButton emptyButton;
+  ToolButton tbRecomps;
   string pendingSource;       // the disc image the next setup copies the game from
   public string NextGame;
   public string NextSource => null;
@@ -62,12 +68,13 @@ sealed partial class MainForm : Form {
   int coverPass;
   string shotFile;
 
-  public MainForm(GameConfig config, string kitDir, int page = 0, Recomp recomp = null, RecompGame game = null, string source = null) {
+  string startKey;
+
+  public MainForm(GameConfig config, string kitDir, int page = 0, RecompRegistry registry = null, string selectKey = null) {
     cfg = config;
     root = kitDir;
-    this.recomp = recomp;
-    this.game = game;
-    pendingSource = source;
+    this.registry = registry;
+    startKey = selectKey;
     Text = Title();
     try { Icon = Icon.ExtractAssociatedIcon(launcherPath); } catch (Exception) { }
     Font = Theme.UI(10f);
@@ -89,9 +96,17 @@ sealed partial class MainForm : Form {
     BuildLogPanel();
     BuildDetail();
     library = new GameLibrary { Dock = DockStyle.Fill, Grid = Prefs.Bool("grid", true), TileSize = Prefs.Int("tile_size", 1) };
-    library.EmptyText = recomp != null
-        ? L.T("Nenhum jogo. Adicione a pasta onde ficam as suas ISOs.", "No games. Add the folder that holds your ISOs.")
+    library.EmptyText = Lib
+        ? L.T("Nenhum jogo ainda. Adicione uma ou mais pastas onde ficam as suas ISOs: o launcher procura nelas (e nas subpastas), reconhece o console e o jogo de cada disco e mostra as capas.",
+              "No games yet. Add one or more folders that hold your ISOs: the launcher searches them (and their subfolders), recognises each disc's console and game and shows the covers.")
         : "";
+    tabs = new ConsoleTabs { Visible = Lib };
+    tabs.Changed += (s, e) => { library.Console = tabs.Selected; Prefs.Set("console_tab", tabs.Selected ?? ""); UpdateEmpty(); };
+    library.ConsoleReset += (s, e) => { tabs.Selected = null; tabs.Invalidate(); };
+    emptyButton = new FlatButton(L.T("ADICIONAR PASTA DE JOGOS", "ADD A GAME FOLDER"), ButtonKind.Primary, 300, 48) { Font = Theme.Semi(11.5f), Visible = false };
+    emptyButton.Click += (s, e) => AddFolders();
+    library.Controls.Add(emptyButton);
+    library.Resize += (s, e) => PlaceEmpty();
     library.SelectionChanged += (s, e) => OnSelected();
     library.Activated += (s, e) => PrimaryAction();
     library.MenuRequested += (entry, at) => GameMenu().Show(library, at);
@@ -99,6 +114,7 @@ sealed partial class MainForm : Form {
 
     // Docking order: the last added sits outermost.
     Controls.Add(library);
+    Controls.Add(tabs);
     Controls.Add(logSplitter);
     Controls.Add(logPanel);
     Controls.Add(detail);
@@ -126,15 +142,27 @@ sealed partial class MainForm : Form {
     RefreshStatus();
   }
 
-  string Title() => (recomp != null ? recomp.Name : cfg.Game) + " — " + L.T("Launcher", "Launcher");
+  string Title() => Lib ? "Port launcher" : cfg.Game + " — Launcher";
 
-  // Test aid (--shot): 0 library, 1 dependencies, 2 log, 3 PC settings, 4 list view.
+  void PlaceEmpty() {
+    if (emptyButton == null) return;
+    emptyButton.Location = new Point((library.ClientSize.Width - emptyButton.Width) / 2, library.ClientSize.Height / 2 + K(64));
+  }
+
+  void UpdateEmpty() {
+    if (emptyButton == null) return;
+    emptyButton.Visible = Lib && library.Entries.Count == 0 && !scanning;
+    PlaceEmpty();
+  }
+
+  // Test aid (--shot): 0 library, 1 dependencies, 2 log, 3 PC settings, 4 list view, 5 recompilers.
   public void ShotOnLoad(string file, int tab) {
     shotFile = file;
     Shown += (o, e) => {
       Control target = this;
       if (tab == 2) { SetLogVisible(true); AppendLog("== 2/5 " + L.T("Exemplo de etapa", "Example step")); }
       if (tab == 4) library.Grid = false;
+      if (tab == 5) { var rd = new RecompsDialog(registry); rd.Show(this); target = rd; }
       if (tab == 1 || tab == 3) {
         var dlg = tab == 1 ? OpenDepsDialog() : OpenSettingsDialog();
         dlg.Show(this);
@@ -244,7 +272,7 @@ sealed partial class MainForm : Form {
 
   MenuStrip BuildMenu() {
     var menu = new MenuStrip { Renderer = new DarkMenuRenderer(), BackColor = Theme.Surface, ForeColor = Theme.Text, Font = Theme.UI(9.5f), Padding = new Padding(8, 3, 0, 3) };
-    bool rc = recomp != null;
+    bool rc = Lib;
 
     var file = MenuTop(L.T("Arquivo", "File"),
         Item(L.T("Abrir disco (ISO)...", "Open disc (ISO)..."), () => ChooseDisc(null), Keys.Control | Keys.O),
@@ -252,7 +280,8 @@ sealed partial class MainForm : Form {
         Item(L.T("Pastas de jogos...", "Game folders..."), ManageFolders),
         Item(L.T("Procurar jogos de novo", "Rescan game folders"), Rescan, Keys.F5),
         Sep(),
-        Item(L.T("Abrir a pasta do recompilador", "Open the recompiler folder"), () => Explore(rc ? recomp.Root : root)),
+        Item(L.T("Recompiladores...", "Recompilers..."), ShowRecomps, Keys.Control | Keys.R),
+        Item(L.T("Abrir a pasta do recompilador", "Open the recompiler folder"), () => Explore(recomp?.Root ?? root)),
         Sep(),
         Item(L.T("Sair", "Exit"), Close, Keys.Alt | Keys.F4));
     foreach (ToolStripItem i in file.DropDownItems) if (i.Text != L.T("Sair", "Exit") && !(i is ToolStripSeparator) && i.Text != L.T("Abrir disco (ISO)...", "Open disc (ISO)...")) i.Enabled = rc;
@@ -333,7 +362,7 @@ sealed partial class MainForm : Form {
     if (Busy) { Dialog.Info(this, Text, L.T("Espere terminar para trocar o tema.", "Wait for it to finish before changing the theme.")); return; }
     Theme.Apply(mode);
     Theme.Save();
-    NextGame = game?.Id;
+    NextGame = Current?.Key ?? game?.Id;
     Restart = true;
     Close();
   }
@@ -372,7 +401,7 @@ sealed partial class MainForm : Form {
     list.Add(stop);
     list.Add(Sep());
     var disc = Item(L.T("Escolher o disco deste jogo...", "Choose this game's disc..."), () => ChooseDisc(e));
-    disc.Enabled = selected && !busy && recomp != null && !e.NoProfile;
+    disc.Enabled = selected && !busy && Lib && e.Game != null;
     list.Add(disc);
     var cover = Item(L.T("Escolher capa...", "Choose cover..."), ChooseCover);
     cover.Enabled = selected;
@@ -429,10 +458,12 @@ sealed partial class MainForm : Form {
     tbSettings.Click += (s, e) => ShowSettings();
     tbDeps = new ToolButton(Glyph.Box, L.T("Dependências", "Dependencies"), 92);
     tbDeps.Click += (s, e) => ShowDeps();
+    tbRecomps = new ToolButton(Glyph.Update, L.T("Recompiladores", "Recompilers"), 104);
+    tbRecomps.Click += (s, e) => ShowRecomps();
     var tbLog = new ToolButton(Glyph.Log, "Log");
     tbLog.Click += (s, e) => SetLogVisible(!logPanel.Visible);
-    left.Controls.AddRange(new Control[] { tbOpen, tbFolders, tbRefresh, new ToolSeparator(), tbPlay, tbStop, tbInstall, new ToolSeparator(), tbSettings, tbDeps, tbLog });
-    if (recomp == null) { tbFolders.Visible = tbRefresh.Visible = false; }
+    left.Controls.AddRange(new Control[] { tbOpen, tbFolders, tbRefresh, new ToolSeparator(), tbPlay, tbStop, tbInstall, new ToolSeparator(), tbSettings, tbDeps, tbRecomps, tbLog });
+    if (!Lib) { tbFolders.Visible = tbRefresh.Visible = tbRecomps.Visible = false; }
 
     var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, BackColor = Theme.Surface, Padding = new Padding(0, 12, 0, 0) };
     viewSwitch = new ViewSwitch { Margin = new Padding(0, 0, 12, 0) };
@@ -522,6 +553,7 @@ sealed partial class MainForm : Form {
     if (e == null) {
       detailName.Text = L.T("Nenhum jogo selecionado", "No game selected");
       detailSub.Text = ""; detailState.Visible = false; detailPrimary.Visible = false; detailNote.Text = "";
+      detailSettings.Parent.Visible = false;
       detail.ResumeLayout();
       return;
     }
@@ -532,14 +564,16 @@ sealed partial class MainForm : Form {
     detailState.Set(SetupRunning && current ? L.T("Instalando...", "Installing...") : Busy && current ? L.T("Em jogo", "Playing") : e.StateText,
                     SetupRunning && current ? Theme.Blue : e.StateColor);
     detailPrimary.Visible = true;
+    detailSettings.Parent.Visible = true;
     detailPrimary.Text = PrimaryText(e);
     detailPrimary.Kind = e.State == EntryState.Ready ? ButtonKind.Primary : ButtonKind.Blue;
     detailPrimary.Enabled = !Busy;
     detailPrimary.Invalidate();
     detailSettings.Enabled = current && !e.NoProfile;
     if (e.Disc != null) Fact(L.T("Disco", "Disc"), Path.GetFileName(e.Disc) + Environment.NewLine + Path.GetDirectoryName(e.Disc));
-    if (e.Dir != null) Fact(L.T("Pasta do jogo", "Game folder"), recomp != null && e.Dir.StartsWith(recomp.Root, StringComparison.OrdinalIgnoreCase)
-                                                                     ? recomp.Name + e.Dir.Substring(recomp.Root.Length) : e.Dir);
+    if (e.Dir != null) Fact(L.T("Pasta do jogo", "Game folder"), e.Recomp != null && e.Dir.StartsWith(e.Recomp.Root, StringComparison.OrdinalIgnoreCase)
+                                                                     ? e.Recomp.Name + e.Dir.Substring(e.Recomp.Root.Length) : e.Dir);
+    if (Lib && e.Console != null) Fact(L.T("Recompilador", "Recompiler"), e.Recomp?.Name ?? e.Known?.Name ?? L.T("nenhum para este console", "none for this console"));
     if (current && !e.NoProfile && !Installed) {
       if (cfg.DiskGb > 0) Fact(L.T("Espaço necessário", "Space needed"), "~" + cfg.DiskGb + " GB");
       if (!string.IsNullOrEmpty(cfg.Minutes)) Fact(L.T("Primeira montagem", "First build"), L.T("cerca de ", "about ") + cfg.Minutes + " min");
@@ -550,16 +584,26 @@ sealed partial class MainForm : Form {
   }
 
   string PrimaryText(GameEntry e) {
+    if (e.NeedsRecomp) return e.Known != null ? L.T("BAIXAR ", "GET ") + e.Known.Folder.ToUpperInvariant() : L.T("SEM RECOMPILADOR", "NO RECOMPILER");
+    if (e.Unsupported) return L.T("AINDA SEM SUPORTE", "NOT SUPPORTED YET");
     if (e.NoProfile) return L.T("MONTAR (GENÉRICO)", "BUILD (GENERIC)");
     switch (e.State) {
       case EntryState.Ready: return L.T("JOGAR", "PLAY");
       case EntryState.HasDisc: return L.T("INSTALAR E MONTAR", "INSTALL AND BUILD");
       case EntryState.Kit: return L.T("INSTALAR", "INSTALL");
-      default: return recomp != null ? L.T("ESCOLHER O DISCO...", "CHOOSE THE DISC...") : L.T("INSTALAR", "INSTALL");
+      default: return Lib ? L.T("ESCOLHER O DISCO...", "CHOOSE THE DISC...") : L.T("INSTALAR", "INSTALL");
     }
   }
 
   string DetailNote(GameEntry e) {
+    if (e.NeedsRecomp)
+      return e.Known != null
+          ? L.T($"Jogos de {Consoles.Name(e.Console)} usam o {e.Known.Name}, que ainda não está neste PC. O launcher baixa o código dele do GitHub (nada de nenhum jogo) e depois monta o jogo a partir do seu disco.",
+                $"{Consoles.Name(e.Console)} games use {e.Known.Name}, which is not on this PC yet. The launcher downloads its source from GitHub (nothing from any game), then builds the game from your disc.")
+          : L.T("Ainda não há recompilador para este console.", "There is no recompiler for this console yet.");
+    if (e.Unsupported)
+      return L.T($"O {e.Recomp?.Name} ainda não tem este jogo. Atualizações do recompilador podem trazer suporte (menu Atualizações).",
+                 $"{e.Recomp?.Name} does not have this game yet. Recompiler updates may add it (Updates menu).");
     if (e.NoProfile)
       return L.T("Este disco não tem perfil neste recompilador. O caminho genérico tenta montar qualquer jogo; pode não funcionar ou parar em algum ponto.",
                  "This disc has no profile in this recompiler. The generic path tries to build any game; it may not work or may stop somewhere.");
@@ -624,8 +668,8 @@ sealed partial class MainForm : Form {
   }
 
   void UpdateCounts() {
-    if (recomp == null) { statusRight.Text = Updater.Describe(); return; }
-    int games = library.Entries.Count(x => !x.NoProfile), ready = library.Entries.Count(x => x.State == EntryState.Ready);
+    if (!Lib) { statusRight.Text = Updater.Describe(); return; }
+    int games = library.Entries.Count, ready = library.Entries.Count(x => x.State == EntryState.Ready);
     int folders = GameFolders.Load().Count;
     string text = L.T($"{games} jogos  ·  {ready} prontos  ·  {found.Count} discos em {folders} pasta{(folders == 1 ? "" : "s")}",
                       $"{games} games  ·  {ready} ready  ·  {found.Count} discs in {folders} folder{(folders == 1 ? "" : "s")}");
@@ -635,40 +679,60 @@ sealed partial class MainForm : Form {
 
   // ------------------------------------------------------------------ the library
 
-  bool IsCurrent(GameEntry e) => e != null && (recomp == null ? e.Key == "kit" : e.Game != null && e.Game == game);
+  bool IsCurrent(GameEntry e) => e != null && (!Lib ? e.Key == "kit" : e.Game != null && e.Game == game);
 
-  // Every game of the recompiler (with the disc found for it), then discs with no profile (built by the generic path).
+  // Library mode: the discs found in the player's folders (one entry per game), plus games already built from an
+  // earlier disc; each with its console, its recompiler and what it takes to play it. Nothing else is listed.
   void BuildEntries() {
     var old = library.Entries.ToDictionary(x => x.Key + "|" + x.Disc, x => x);
     var entries = new List<GameEntry>();
-    if (recomp == null) {
+    if (!Lib) {
       entries.Add(new GameEntry { Key = "kit", Name = cfg.Game, Serial = cfg.Disc, Dir = root, Installed = Installed, Platform = L.T("Port para PC", "PC port") });
     } else {
-      string platform = recomp.Name;
-      foreach (var g in recomp.Games) {
-        var disc = found.FirstOrDefault(f => f.Game == g);
-        bool installed = false;
-        try { var c = g == game ? cfg : recomp.ConfigFor(g); installed = c.Exe != null && File.Exists(Path.Combine(g.Dir, c.Exe)); } catch (Exception) { }
-        string serial = Covers.Serial(disc?.Label) ?? g.Executables.Select(Covers.Serial).FirstOrDefault(x => x != null);
-        entries.Add(new GameEntry { Key = g.Id, Game = g, Name = g.Name, Serial = serial ?? Short(g.Disc), Disc = disc?.Path, Dir = g.Dir, Installed = installed, Platform = platform });
-      }
-      if (recomp.Generic != null) {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        // Only discs of this console: a PlayStation 2 disc names its boot executable (SLUS_214.23), a PS5 dump its
-        // title id (PPSA01949); the recompiler's launcher.json "generic_label" says which.
-        foreach (var f in found.Where(f => f.Game == null && f.Label != null && Regex.IsMatch(f.Label, recomp.LabelRegex, RegexOptions.IgnoreCase))) {
-          if (!seen.Add(f.Label)) continue;
-          string name = f.IsFolder ? new DirectoryInfo(f.Path).Name : Path.GetFileNameWithoutExtension(f.Path);
-          entries.Add(new GameEntry { Key = "disc:" + f.Label, Name = name, Serial = Covers.Serial(f.Label) ?? f.Label, Disc = f.Path, NoProfile = true,
-                                      Platform = platform + L.T(" · sem perfil", " · no profile") });
+      var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+      foreach (var kv in registry.Installed) {
+        var rc = kv.Value;
+        string console = registry.Known.FirstOrDefault(k => k.Id == kv.Key)?.Console;
+        foreach (var g in rc.Games) {
+          var disc = found.FirstOrDefault(f => f.Game == g);
+          bool installed = false;
+          try { var c = g == game ? cfg : rc.ConfigFor(g); installed = c.Exe != null && File.Exists(Path.Combine(g.Dir, c.Exe)); } catch (Exception) { }
+          if (disc == null && !installed) continue;
+          string key = kv.Key + "/" + g.Id;
+          seen.Add(key);
+          string serial = Covers.Serial(disc?.Label) ?? g.Executables.Select(Covers.Serial).FirstOrDefault(x => x != null);
+          entries.Add(new GameEntry { Key = key, Game = g, Recomp = rc, Known = registry.KnownFor(rc), Console = console, Name = g.Name,
+                                      Serial = serial ?? Short(g.Disc), Disc = disc?.Path, Dir = g.Dir, Installed = installed, Platform = Consoles.Short(console) });
         }
+      }
+      foreach (var f in found.Where(f => f.Game == null)) {
+        string key = "disc:" + f.Console + ":" + (f.Label ?? f.Path);
+        if (!seen.Add(key)) continue;
+        string name = f.IsFolder ? new DirectoryInfo(f.Path).Name : Path.GetFileNameWithoutExtension(f.Path);
+        var known = registry.ForConsole(f.Console);
+        bool generic = f.Recomp != null && f.Recomp.Generic != null && f.Label != null && Regex.IsMatch(f.Label, f.Recomp.LabelRegex, RegexOptions.IgnoreCase);
+        entries.Add(new GameEntry { Key = key, Name = name, Serial = Covers.Serial(f.Label) ?? f.Label, Disc = f.Path, Console = f.Console,
+                                    Recomp = f.Recomp, Known = known, NeedsRecomp = f.Recomp == null, NoProfile = generic,
+                                    Unsupported = f.Recomp != null && !generic, Platform = Consoles.Short(f.Console) });
       }
     }
     foreach (var e in entries)
       if (old.TryGetValue(e.Key + "|" + e.Disc, out var prev)) { e.Cover = prev.Cover; e.CoverDone = prev.CoverDone; }
-    library.SetEntries(entries, Current?.Key ?? game?.Id ?? "kit");
+    library.SetEntries(entries, Current?.Key ?? startKey ?? (Prefs.Text("last_game", "") is var lg && lg.Length > 0 ? lg : null) ?? "kit");
+    startKey = null;
+    if (Lib) {
+      var list = new List<ConsoleTabs.Tab> { new ConsoleTabs.Tab { Id = null, Text = L.T("Todos", "All"), Count = entries.Count } };
+      foreach (string c in Consoles.Order) {
+        int n = entries.Count(x => x.Console == c);
+        if (n > 0) list.Add(new ConsoleTabs.Tab { Id = c, Text = Consoles.Short(c), Count = n });
+      }
+      string want = tabs.Selected ?? Prefs.Text("console_tab", "");
+      tabs.Set(list, want.Length > 0 ? want : null);
+      library.Console = tabs.Selected;
+    }
     LoadCovers();
     UpdateCounts();
+    UpdateEmpty();
   }
 
   static string Short(string disc) {
@@ -681,12 +745,12 @@ sealed partial class MainForm : Form {
     int pass = ++coverPass;
     var todo = library.Entries.Where(x => !x.CoverDone).ToList();
     if (todo.Count == 0) return;
-    string url = recomp?.CoverUrl;
     bool online = Prefs.Bool("online_covers", true);
     Task.Run(() => {
       foreach (var e in todo) {
         if (pass != coverPass) return;
         Bitmap b = null;
+        string url = e.Recomp?.CoverUrl ?? (e.Console == "ps2" ? Covers.DefaultPs2Url : null);
         try { b = Covers.Find(e.Key, e.Serial, e.Dir, e.Disc, url, online); } catch (Exception) { }
         try {
           BeginInvoke(new Action(() => {
@@ -718,19 +782,25 @@ sealed partial class MainForm : Form {
 
   void OnSelected() {
     var e = Current;
-    if (e != null && recomp != null && e.Game != null && e.Game != game && !Busy) {
-      try {
-        cfg = recomp.ConfigFor(e.Game);
-        game = e.Game;
-        root = game.Dir;
-        Settings.SaveLastGame(recomp.Root, game.Id);
-      } catch (Exception ex) { AppendLog(e.Game.Id + ": " + ex.Message); }
+    if (e != null && Lib && !Busy) {
+      recomp = e.Recomp;
+      if (e.Game != null && e.Game != game) {
+        try {
+          cfg = e.Recomp.ConfigFor(e.Game);
+          game = e.Game;
+          root = game.Dir;
+        } catch (Exception ex) { AppendLog(e.Game.Id + ": " + ex.Message); }
+      } else if (e.Game == null) {
+        game = null;
+        root = null;
+      }
+      Prefs.Set("last_game", e.Key);
     }
     RefreshStatus();
   }
 
   void SelectGame(string id) {
-    library.SelectKey(id);
+    library.SelectKey(id.Contains("/") || id.StartsWith("disc:") ? id : (registry?.KnownFor(recomp)?.Id + "/" + id));
     OnSelected();
   }
 
@@ -738,22 +808,26 @@ sealed partial class MainForm : Form {
   void PrimaryAction() {
     var e = Current;
     if (e == null || Busy) return;
+    if (e.NeedsRecomp) { if (e.Known != null) DownloadRecomp(e.Known); return; }
+    if (e.Unsupported) { Dialog.Info(this, e.Name, DetailNote(e)); return; }
     if (e.NoProfile) { AddGenericPort(e.Disc, null); return; }
     if (!IsCurrent(e)) return;
     if (Installed) { Play(); return; }
-    if (e.Disc != null || recomp == null) { Install(e.Disc); return; }
+    if (e.Disc != null || !Lib) { Install(e.Disc); return; }
     ChooseDisc(e);
   }
 
   void PrimaryInstall() {
     var e = Current;
     if (e == null || Busy) return;
-    if (e.NoProfile) AddGenericPort(e.Disc, null);
-    else Install(e.Disc);
+    if (e.NeedsRecomp || e.Unsupported) PrimaryAction();
+    else if (e.NoProfile) AddGenericPort(e.Disc, null);
+    else if (IsCurrent(e)) Install(e.Disc);
   }
 
   void ShowFolderHint() {
-    if (recomp == null || GameFolders.Load().Count > 0) { folderBar.Visible = false; return; }
+    // Library mode: the empty library has its own big button; the bar would only repeat it.
+    if (!Lib || GameFolders.Load().Count > 0 || library.Entries.Count == 0) { folderBar.Visible = false; return; }
     folderBar.Show(Glyph.FolderAdd, Theme.Accent,
         L.T("Adicione as pastas onde ficam as suas ISOs: o launcher procura nelas (e nas subpastas) e reconhece cada jogo pelo disco.",
             "Add the folders that hold your ISOs: the launcher searches them (and their subfolders) and recognises each game from its disc."),
@@ -762,7 +836,7 @@ sealed partial class MainForm : Form {
   }
 
   void AddFolders() {
-    if (recomp == null) return;
+    if (!Lib) return;
     var picked = FolderPicker.Pick(this, L.T("Escolha uma ou mais pastas com jogos (ISOs)", "Choose one or more folders with games (ISOs)"));
     if (picked.Count == 0) return;
     GameFolders.Add(picked);
@@ -771,14 +845,14 @@ sealed partial class MainForm : Form {
   }
 
   void ManageFolders() {
-    if (recomp == null) return;
+    if (!Lib) return;
     using (var d = new FoldersDialog()) d.ShowDialog(this);
     ShowFolderHint();
     Rescan();
   }
 
   async void Rescan() {
-    if (recomp == null) return;
+    if (!Lib) return;
     scanCancel?.Cancel();
     var cancel = scanCancel = new CancellationTokenSource();
     var folders = GameFolders.Load();
@@ -786,7 +860,7 @@ sealed partial class MainForm : Form {
     scanning = true;
     tbRefresh.Enabled = false;
     UpdateCounts();
-    var r = recomp;
+    var r = registry;
     List<FoundDisc> result;
     try {
       result = await Task.Run(() => DiscScanner.Scan(r, folders, path => {
@@ -804,9 +878,9 @@ sealed partial class MainForm : Form {
 
   void OnDrop(string[] paths) {
     if (paths == null || paths.Length == 0) return;
-    var dirs = paths.Where(Directory.Exists).Where(d => !File.Exists(Path.Combine(d, "SYSTEM.CNF"))).ToList();
-    var disc = paths.FirstOrDefault(p => File.Exists(p) && p.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) || Directory.Exists(p) && File.Exists(Path.Combine(p, "SYSTEM.CNF")));
-    if (dirs.Count > 0 && recomp != null) {
+    var dirs = paths.Where(Directory.Exists).Where(d => !DiscScanner.IsExtractedDisc(d)).ToList();
+    var disc = paths.FirstOrDefault(p => File.Exists(p) && p.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) || Directory.Exists(p) && DiscScanner.IsExtractedDisc(p));
+    if (dirs.Count > 0 && Lib) {
       int added = GameFolders.Add(dirs);
       statusLeft.Text = L.T($"{added} pasta(s) adicionada(s).", $"{added} folder(s) added.");
       ShowFolderHint();
@@ -816,9 +890,10 @@ sealed partial class MainForm : Form {
   }
 
   void ReloadRecomp(string selectId) {
-    recomp = Recomp.Load(recomp.Root) ?? recomp;
-    var g = recomp.Games.FirstOrDefault(x => x.Id == (selectId ?? game?.Id)) ?? recomp.Games.FirstOrDefault();
-    if (g != null) { game = g; cfg = recomp.ConfigFor(g); root = g.Dir; }
+    if (recomp == null) { Rescan(); return; }
+    recomp = registry.Reload(recomp);
+    var g = recomp.Games.FirstOrDefault(x => x.Id == (selectId ?? game?.Id));
+    if (g != null) { game = g; cfg = recomp.ConfigFor(g); root = g.Dir; startKey = registry.KnownFor(recomp)?.Id + "/" + g.Id; }
     // A new profile may now match discs found before: the next scan reads them again.
     BuildEntries();
     if (g != null) SelectGame(g.Id);
@@ -839,7 +914,16 @@ sealed partial class MainForm : Form {
   // A disc image (or extracted folder) picks its game; with a profile it is installed, without one the generic path is offered.
   void OpenDisc(string path) {
     if (Busy) return;
-    if (recomp == null) { Install(path); return; }
+    if (!Lib) { Install(path); return; }
+    string console = Consoles.Identify(path, out _);
+    if (console == null) { Dialog.Info(this, Text, L.T("Não reconheci este disco (PS2, Xbox, Xbox 360, PSP ou dump de PS5). Imagens .iso precisam ter setores de 2048 bytes.", "This disc was not recognised (PS2, Xbox, Xbox 360, PSP or a PS5 dump). .iso images need 2048-byte sectors.")); return; }
+    recomp = registry.RecompForConsole(console);
+    if (recomp == null) {
+      var k = registry.ForConsole(console);
+      if (k != null && Dialog.Ask(this, Text, L.T($"Este é um disco de {Consoles.Name(console)}. O recompilador dele ({k.Name}) ainda não está neste PC. Baixar agora?", $"This is a {Consoles.Name(console)} disc. Its recompiler ({k.Name}) is not on this PC yet. Download it now?"),
+                                  L.T("Baixar", "Download"), L.T("Cancelar", "Cancel"))) DownloadRecomp(k);
+      return;
+    }
     var match = recomp.Detect(path, out string boot);
     if (match == null && boot != null && recomp.Generic != null) { AddGenericPort(path, boot); return; }
     if (match == null) {
@@ -857,6 +941,7 @@ sealed partial class MainForm : Form {
   }
 
   void AddGenericPort(string path, string boot) {
+    if (Current != null && Current.Recomp != null && Current.Disc == path) recomp = Current.Recomp;
     if (Busy || recomp == null || path == null) return;
     if (boot == null) recomp.Detect(path, out boot);
     if (boot == null) { Dialog.Info(this, Text, L.T("Não foi possível ler este disco.", "This disc could not be read.")); return; }
@@ -891,16 +976,18 @@ sealed partial class MainForm : Form {
     library.Locked = busy;
     tbPlay.Enabled = current && Installed && !busy;
     tbStop.Enabled = busy;
-    tbInstall.Enabled = e != null && !busy && (current || e.NoProfile);
-    tbInstall.Text = e != null && e.NoProfile ? L.T("Montar", "Build") : current && Installed ? L.T("Reparar", "Repair") : L.T("Instalar", "Install");
+    tbInstall.Enabled = e != null && !busy && (current || e.NoProfile || e.NeedsRecomp);
+    tbInstall.Text = e != null && e.NeedsRecomp ? L.T("Baixar", "Get") : e != null && e.NoProfile ? L.T("Montar", "Build") : current && Installed ? L.T("Reparar", "Repair") : L.T("Instalar", "Install");
     tbSettings.Enabled = current && !e.NoProfile;
     tbDeps.Enabled = current && !e.NoProfile;
+    if (tbRecomps != null) tbRecomps.Enabled = !busy;
     tbOpen.Enabled = !busy;
     cancelButton.Enabled = busy;
     cancelButton.Text = SetupRunning || !busy ? L.T("Parar", "Stop") : L.T("Fechar jogo", "Close game");
     if (SetupRunning) statusLeft.Text = L.T("Instalando ", "Setting up ") + cfg.Game + L.T("... acompanhe no log. Pode demorar; deixe esta janela aberta.", "... follow it in the log. It takes a while; keep this window open.");
     else if (busy) statusLeft.Text = L.T("Em jogo: ", "Playing: ") + cfg.Game + L.T(". O launcher volta quando o jogo fechar.", ". The launcher comes back when the game closes.");
     else if (e == null) statusLeft.Text = "";
+    else if (e.NeedsRecomp || e.Unsupported) statusLeft.Text = e.Disc ?? "";
     else if (e.NoProfile) statusLeft.Text = L.T("Disco sem perfil: ", "Disc without a profile: ") + e.Disc;
     else if (current && Installed) statusLeft.Text = L.T("Pronto para jogar  ·  ", "Ready to play  ·  ") + root;
     else if (root == null) statusLeft.Text = L.T($"Não instalado. Precisa de cerca de {cfg.DiskGb} GB livres e {cfg.Minutes} minutos.", $"Not installed. About {cfg.DiskGb} GB free and {cfg.Minutes} minutes are needed.");
@@ -921,21 +1008,23 @@ sealed partial class MainForm : Form {
     LauncherRelease rel = null;
     string target = null, local = null, label = null, error = null;
     bool recompNewer = false;
-    var r = recomp;
+    Recomp r = null;
+    var all = registry?.Installed.Values.ToList() ?? new List<Recomp>();
     await Task.Run(() => {
       try { rel = Updater.Latest(channel); } catch (Exception ex) { error = ex.Message; }
-      if (r?.Repo != null) {
+      foreach (var x in all) {
+        if (x.Repo == null) continue;
         try {
-          target = Updater.RecompTarget(r, channel, out label);
-          local = Updater.LocalHead(r);
-          recompNewer = target != null && (local == null || !string.Equals(local, target, StringComparison.OrdinalIgnoreCase));
+          string t = Updater.RecompTarget(x, channel, out string lb), lo = Updater.LocalHead(x);
+          if (r == null) { r = x; target = t; label = lb; local = lo; }
+          if (t != null && (lo == null || !string.Equals(lo, t, StringComparison.OrdinalIgnoreCase))) { r = x; target = t; label = lb; local = lo; recompNewer = true; break; }
         } catch (Exception ex) { error = error ?? ex.Message; }
       }
     });
     if (IsDisposed) return;
     bool launcherNewer = Updater.CanReplaceSelf && Updater.IsNewer(rel, channel);
     if (launcherNewer && !manual && Prefs.Bool("update_auto", true) && !Updater.IsLocalBuild && !Busy) { UpdateLauncher(rel); return; }
-    if (recompNewer && !manual && Prefs.Bool("update_recomp_auto", false) && !Busy) UpdateRecomp(target, label);
+    if (recompNewer && !manual && Prefs.Bool("update_recomp_auto", false) && !Busy) UpdateRecomp(r, target, label);
     else if (launcherNewer || recompNewer) {
       var actions = new List<KeyValuePair<string, Action>>();
       string msg;
@@ -944,12 +1033,12 @@ sealed partial class MainForm : Form {
         actions.Add(new KeyValuePair<string, Action>(L.T("Atualizar launcher", "Update launcher"), () => UpdateLauncher(rel)));
         if (recompNewer) {
           msg += L.T($"  O {r.Name} também tem novidades ({label}).", $"  {r.Name} has news too ({label}).");
-          actions.Add(new KeyValuePair<string, Action>(L.T("Atualizar ", "Update ") + r.Name, () => UpdateRecomp(target, label)));
+          actions.Add(new KeyValuePair<string, Action>(L.T("Atualizar ", "Update ") + r.Name, () => UpdateRecomp(r, target, label)));
         }
       } else {
         msg = L.T($"Há uma versão nova do {r.Name} ({label}{(target != null ? " " + target.Substring(0, 7) : "")}): perfis de jogos e correções.",
                   $"A new version of {r.Name} is out ({label}{(target != null ? " " + target.Substring(0, 7) : "")}): game profiles and fixes.");
-        actions.Add(new KeyValuePair<string, Action>(L.T("Atualizar agora", "Update now"), () => UpdateRecomp(target, label)));
+        actions.Add(new KeyValuePair<string, Action>(L.T("Atualizar agora", "Update now"), () => UpdateRecomp(r, target, label)));
       }
       actions.Add(new KeyValuePair<string, Action>(L.T("Depois", "Later"), () => updateBar.Visible = false));
       updateBar.Show(Glyph.Update, Theme.Blue, msg, actions.ToArray());
@@ -980,8 +1069,9 @@ sealed partial class MainForm : Form {
     Close();
   }
 
-  async void UpdateRecomp(string sha, string label) {
-    if (Busy || recomp == null || sha == null) return;
+  async void UpdateRecomp(Recomp target, string sha, string label) {
+    if (Busy || target == null || sha == null) return;
+    recomp = target;
     updateBar.Visible = false;
     SetLogVisible(true);
     log.Clear();
@@ -1096,7 +1186,7 @@ sealed partial class MainForm : Form {
 
   string SetupArguments(string only) {
     string args;
-    if (recomp != null) {
+    if (Lib && recomp != null) {
       recomp.EnsureInstallerFiles(AppendLog);
       args = $"-NoProfile -ExecutionPolicy Bypass -File \"{recomp.Setup}\" -Yes -NoShortcut -GameDir \"{root}\" -ToolsDir \"{recomp.ToolsDir}\"";
     } else {
@@ -1144,13 +1234,13 @@ sealed partial class MainForm : Form {
   void CreateShortcut() {
     try {
       // Recompiler mode: this launcher, opened on the game; a kit: a copy of the launcher inside it.
-      string exe = recomp != null ? launcherPath : Path.Combine(root, Path.GetFileName(launcherPath));
+      string exe = Lib ? launcherPath : Path.Combine(root, Path.GetFileName(launcherPath));
       if (!File.Exists(exe)) File.Copy(launcherPath, exe);
       var shellType = Type.GetTypeFromProgID("WScript.Shell");
       dynamic shell = Activator.CreateInstance(shellType);
       dynamic link = shell.CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), cfg.Game + ".lnk"));
       link.TargetPath = exe;
-      if (recomp != null && game != null) link.Arguments = $"--root \"{recomp.Root}\" --game {game.Id}";
+      if (Lib && recomp != null && game != null) link.Arguments = $"--game \"{registry.KnownFor(recomp)?.Id}/{game.Id}\"";
       link.WorkingDirectory = root;
       link.IconLocation = exe + ",0";
       link.Save();
