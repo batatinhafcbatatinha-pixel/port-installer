@@ -82,10 +82,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { repo: batatinhafcbatatinha-pixel/PS2Recomp, branch: main, name: PS2Recomp, tools: 'cmake,ninja' }
+          - { repo: batatinhafcbatatinha-pixel/PS2Recomp, branch: main, name: PS2Recomp, tools: 'llvm-mingw,cmake,ninja' }
           - { repo: batatinhafcbatatinha-pixel/xboxrecomp, branch: ports, name: xboxrecomp, tools: 'cmake,ninja' }
           - { repo: batatinhafcbatatinha-pixel/rexglue-ports, branch: main, name: rexglue-ports, tools: 'cmake,ninja' }
-          - { repo: batatinhafcbatatinha-pixel/PSPRecomp, branch: main, name: PSPRecomp, tools: 'cmake,ninja' }
+          - { repo: batatinhafcbatatinha-pixel/PSPRecomp, branch: main, name: PSPRecomp, tools: 'llvm-mingw,cmake,ninja' }
           - { repo: batatinhafcbatatinha-pixel/AnyPS5, branch: main, name: AnyPS5, tools: '' }
     steps:
       - uses: actions/checkout@v4
