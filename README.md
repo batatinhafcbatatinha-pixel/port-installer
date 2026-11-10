@@ -95,3 +95,10 @@ go to `game_files/`. The ISO is never copied; after everything is verified it as
 CHD, BIN/CUE and encrypted images must be converted first.
 
 No game files, ISOs, keys, original binaries or recompiled code are distributed here.
+
+## Legal
+
+Use only games you own and dumped yourself from your own console or disc. This project does not include, link to or
+explain how to obtain keys, firmware, decryption or dumping tools, jailbreaks or game files, and it does not
+circumvent any protection: it only reads files the user already has. Not affiliated with or endorsed by Sony
+Interactive Entertainment, Microsoft, or any game publisher; all trademarks belong to their owners.
