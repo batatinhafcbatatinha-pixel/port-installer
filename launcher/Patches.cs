@@ -25,6 +25,8 @@ sealed class PatchSource {
 
   // The communities' own repositories, checked to exist (2026-11).
   public static readonly PatchSource[] Recommended = {
+    new PatchSource { Name = "recomp-patches (feitos para os recompiladores)", Repo = "batatinhafcbatatinha-pixel/recomp-patches", Folder = "ps2", Console = "ps2", Format = "pnach", Kind = PatchKind.Patch, Builtin = true },
+    new PatchSource { Name = "recomp-patches (feitos para os recompiladores)", Repo = "batatinhafcbatatinha-pixel/recomp-patches", Folder = "ps5", Console = "ps5", Format = "files", Kind = PatchKind.Patch, Builtin = true },
     new PatchSource { Name = "PCSX2 patches (widescreen, 60 fps, sem entrelaçamento)", Repo = "PCSX2/pcsx2_patches", Folder = "patches", Console = "ps2", Format = "pnach", Kind = PatchKind.Patch, Builtin = true },
     new PatchSource { Name = "CWCheat Database Plus (PPSSPP)", Repo = "Saramagrean/CWCheat-Database-Plus-", Branch = "master", Folder = "cheat.db", Console = "psp", Format = "cwcheat", Kind = PatchKind.Cheat, Builtin = true },
     new PatchSource { Name = "CWCheat Database Plus: códigos de FPS e câmera", Repo = "Saramagrean/CWCheat-Database-Plus-", Branch = "master", Folder = "cheat.db", Console = "psp", Format = "cwcheat", Kind = PatchKind.Patch, Builtin = true },
@@ -224,15 +226,37 @@ static class PatchLibrary {
     return list;
   }
 
-  // Formats the launcher does not read yet: the game's files, to open on GitHub.
+  // The game's files. JSON files in the recomp-patches format (a "writes" list; its FORMAT.md) are patches the
+  // recompiler applies (AnyPS5: tools/ps5port, at play); other formats are listed to open on GitHub.
   static List<PatchEntry> FileList(PatchSource source, PatchGame game, out string note) {
     var files = source.Files();
     var chosen = new List<string>();
     if (game.TitleId != null) chosen = files.Where(f => f.IndexOf(game.TitleId, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
     if (chosen.Count == 0) chosen = ByName(files, game.Name);
+    var list = new List<PatchEntry>();
+    foreach (string f in chosen) {
+      PatchEntry entry = null;
+      if (f.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && chosen.Count <= 40) {
+        try {
+          string text = source.Raw(f);
+          var d = new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.DeserializeObject(text) as IDictionary<string, object>;
+          if (d != null && d.ContainsKey("writes") && d.ContainsKey("name")) {
+            string version = d.ContainsKey("version") ? Convert.ToString(d["version"]) : "";
+            string tested = d.ContainsKey("tested") ? Convert.ToString(d["tested"]) : "";
+            entry = new PatchEntry {
+              Title = Convert.ToString(d["name"]), File = f, Supported = true, Author = d.ContainsKey("author") ? Convert.ToString(d["author"]) : null,
+              Description = string.Join("\n", new[] { d.ContainsKey("description") ? Convert.ToString(d["description"]) : "", version.Length > 0 ? L.T("Versão do jogo: ", "Game version: ") + version : "", tested.Length > 0 ? L.T("Testado: ", "Tested: ") + tested : "" }.Where(x => x.Length > 0)),
+            };
+            entry.Lines.AddRange(text.Replace("\r", "").Split('\n'));
+          }
+        } catch (Exception) { }
+      }
+      list.Add(entry ?? new PatchEntry { Title = Path.GetFileName(f), Description = f, File = f, Supported = false });
+    }
     note = chosen.Count == 0 ? L.T("Nenhum arquivo deste jogo no repositório.", "No file for this game in the repository.")
-                             : L.T("Arquivos encontrados (este recompilador ainda não lê este formato).", "Files found (this recompiler does not read this format yet).");
-    return chosen.Select(f => new PatchEntry { Title = Path.GetFileName(f), Description = f, File = f, Supported = false }).ToList();
+         : list.Any(e => e.Supported) ? L.T($"{list.Count(e => e.Supported)} patch(es) para {game.TitleId ?? game.Name}.", $"{list.Count(e => e.Supported)} patch(es) for {game.TitleId ?? game.Name}.")
+         : L.T("Arquivos encontrados (este recompilador ainda não lê este formato).", "Files found (this recompiler does not read this format yet).");
+    return list;
   }
 
   // Files whose name holds every word of the game's name (3+ letters).
