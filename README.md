@@ -30,7 +30,10 @@ Nothing from any game is in this repository or in its releases: the game always 
    [GoldHEN_Cheat_Repository](https://github.com/GoldHEN/GoldHEN_Cheat_Repository) (PS5). For PS2 games **Apply** writes
    `patches.pnach` / `cheats.pnach` next to the game and runs `tools/ps2port hotpatch`: a patch that changes code
    retranslates only that function into a small library (seconds, no rebuild), the rest are memory writes the runtime
-   makes at boot or every frame. Other recompilers keep the choice until they apply it.
+   makes at boot or every frame. For PS5 games the patches of
+   [recomp-patches](https://github.com/batatinhafcbatatinha-pixel/recomp-patches) (our own, JSON) are written to the
+   game's `patches` folder and AnyPS5's `tools/ps5port` applies them to the converted modules when the game starts.
+   Other recompilers keep the choice until they apply it.
 4. **PLAY**. The **PC settings** tab holds the same options as the in-game F1 menu.
 
 The window works like an emulator's game list: a menu bar, a toolbar (open ISO, game folders, refresh, play, stop,

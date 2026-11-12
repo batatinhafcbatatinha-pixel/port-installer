@@ -173,12 +173,15 @@ sealed class PatchesDialog : Form {
     else note.Text = L.T("Nenhum repositório recomendado para este console. Adicione um.", "No recommended repository for this console. Add one.");
   }
 
-  bool Supported => game.Console == "ps2";
+  // PS2: pnach through ps2port hotpatch. PS5: the JSON patches of recomp-patches, which ps5port applies at play.
+  bool Supported => game.Console == "ps2" || (game.Console == "ps5" && kind == PatchKind.Patch);
   PatchSource Source => sources.Count == 0 ? null : sources[sourceBox.Selected?.Value ?? 0];
 
   string CountText() {
     int n = chosen.Values.Sum(x => x.Count);
-    return n == 0 ? L.T("Nada escolhido.", "Nothing chosen.") : L.T($"{n} escolhido(s). Aplicar recompila só as funções alteradas (segundos).", $"{n} chosen. Apply recompiles only the changed functions (seconds).");
+    if (n == 0) return L.T("Nada escolhido.", "Nothing chosen.");
+    if (game.Console == "ps5") return L.T($"{n} escolhido(s). Valem na próxima vez que o jogo abrir; arquivos que o recompilador não lê são ignorados.", $"{n} chosen. They apply the next time the game starts; files the recompiler does not read are ignored.");
+    return L.T($"{n} escolhido(s). Aplicar recompila só as funções alteradas (segundos).", $"{n} chosen. Apply recompiles only the changed functions (seconds).");
   }
 
   async void LoadEntries() {
@@ -254,6 +257,7 @@ sealed class PatchesDialog : Form {
     sb.AppendLine("// " + What + L.T(" escolhidos no launcher para ", " chosen in the launcher for ") + game.Name + " (" + game.Serial + (game.Crc != null ? " " + game.Crc : "") + "). " +
                   L.T("O launcher reescreve este arquivo.", "The launcher rewrites this file."));
     int count = 0;
+    var json = new List<KeyValuePair<string, string>>();   // PS5: file name -> the patch's JSON text
     foreach (var src in sources) {
       if (!chosen.TryGetValue(src.Key, out var on) || on.Count == 0) continue;
       List<PatchEntry> all;
@@ -264,6 +268,8 @@ sealed class PatchesDialog : Form {
         sb.AppendLine("// " + src.Repo + "/" + e.File);
         foreach (string l in e.Lines) sb.AppendLine(l);
         ++count;
+        if (game.Console == "ps5" && e.Supported && e.File.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+          json.Add(new KeyValuePair<string, string>(Regex.Replace(src.Repo, @"[^\w.-]", "_") + "-" + Path.GetFileName(e.File), string.Join("\n", e.Lines)));
       }
     }
     string file = Path.Combine(gameDir, game.Console == "ps2" ? (kind == PatchKind.Patch ? "patches.pnach" : "cheats.pnach")
@@ -271,6 +277,13 @@ sealed class PatchesDialog : Form {
     try {
       if (count == 0) { if (File.Exists(file)) File.Delete(file); }
       else File.WriteAllText(file, sb.ToString(), new UTF8Encoding(false));
+      if (game.Console == "ps5" && kind == PatchKind.Patch) {
+        // <game>/patches holds exactly the chosen patches: tools/ps5port applies them at play and undoes the rest.
+        string dir = Path.Combine(gameDir, "patches");
+        if (Directory.Exists(dir)) foreach (string old in Directory.GetFiles(dir, "*.json")) File.Delete(old);
+        if (json.Count > 0) Directory.CreateDirectory(dir);
+        foreach (var kv in json) File.WriteAllText(Path.Combine(dir, kv.Key), kv.Value, new UTF8Encoding(false));
+      }
     } catch (Exception ex) { Dialog.Info(this, Text, ex.Message); return; }
     Applied = true;
     Close();
