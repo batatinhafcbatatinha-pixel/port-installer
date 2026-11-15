@@ -9,11 +9,11 @@ Nothing from any game is in this repository or in its releases: the game always 
 ## Play a game (recompilers)
 
 1. Get the launcher, either way:
-   - from a [release](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases), the ZIP of a recompiler
-     (`PS2Recomp.zip`, `xboxrecomp.zip`, `rexglue-ports.zip`, `PSPRecomp.zip`, `AnyPS5.zip`): unzip it and open `Launcher.exe`
-     at its root. Python, CMake and Ninja are already inside (`.local/`), and for PS2Recomp and PSPRecomp the
-     compiler too (llvm-mingw: Clang + mingw-w64), so nothing from Microsoft has to be installed; or
-   - `Launcher.zip` alone: open `Launcher.exe` and get recompilers from **Recompilers** (toolbar or Ctrl+R).
+   - the release ZIP of a recompiler, from that recompiler's own releases (for example
+     [PS2Recomp-windows.zip](https://github.com/batatinhafcbatatinha-pixel/PS2Recomp/releases/latest/download/PS2Recomp-windows.zip)):
+     unzip it and open `Launcher.exe` at its root; or
+   - [`Launcher.exe`](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases/latest/download/Launcher.exe)
+     alone (the only asset of this repository's releases; Windows): get recompilers from **Recompilers** (toolbar or Ctrl+R).
    - Developers: `git clone --recurse-submodules` a recompiler and run `Launcher.cmd`.
 2. The library starts empty. Click **ADD A GAME FOLDER** and pick one or more folders with your discs (`.iso` images or
    extracted discs; subfolders are searched too). Each disc's console is recognised (PS2 `SYSTEM.CNF`, PSP `UMD_DATA.BIN`,
@@ -64,7 +64,7 @@ needed (setup.json `"buildtools": false`). The PC settings become AnyPS5 variabl
 | Path | What |
 | --- | --- |
 | `launcher/` | `Launcher.exe` source (C#, .NET Framework 4.8, built by CI). Recompiler mode: finds `launcher.json` with `games_dir` in its folder or a parent (or `--root`), lists `games/*/setup.json`, `--game <id>` opens one. Kit mode: `launcher.json` next to it or built in. Library mode: one library for every recompiler installed (`%APPDATA%\port-launcher\recomps.txt`, the one it sits in added by itself; more from `recomps.json` in the Recompilers window). |
-| `tools/make_bundle.py` | Builds a recompiler's player ZIP: source + `Launcher.exe` + Python (python-build-standalone, pinned) + CMake/Ninja (pins of `setup/setup_tools.py`). CI runs it for every recompiler on a `v*` tag. |
+| `tools/make_bundle.py` | Builds a recompiler's player ZIP: source + `Launcher.exe` + Python (python-build-standalone, pinned) + CMake/Ninja (pins of `setup/setup_tools.py`), for a local build; releases no longer carry these bundles (each recompiler's own release workflow makes its ZIPs). |
 | `setup/setup.ps1`, `setup/setup_tools.py` | The install and build steps (shared by every port). `-GameDir` = one game folder, `-ToolsDir` = shared tools, `-Source` = the disc image; `-Only python\|buildtools\|tools\|game`. |
 | `installer.py`, `engine.py`, `media.py`, `layout.py` | Game-file installer: ISO 9660 (PS2) and XDVDFS (Xbox/360) or a folder, SHA-256 check against `installer.json`, progress, resume. `--source` starts at once. |
 | `prepare_folder.py` | Sector layout for an extracted folder (`game_files/.disc/`), used by the PS2 runtime instead of an ISO. |
