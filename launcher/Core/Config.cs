@@ -7,7 +7,6 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Web.Script.Serialization;
 
 namespace PortLauncher {
 
@@ -64,11 +63,11 @@ sealed class GameConfig {
       d.TryGetValue(k, out var v) && v is IEnumerable e ? e.OfType<IDictionary<string, object>>() : Enumerable.Empty<IDictionary<string, object>>();
 
   public static GameConfig Parse(string json) {
-    var d = (IDictionary<string, object>)new JavaScriptSerializer().DeserializeObject(json);
+    var d = OS.ForThisSystem(Json.Object(json));
     var c = new GameConfig {
       Game = Str(d, "game", "Game"), Repo = Str(d, "repo"), KitAsset = Str(d, "kit_asset"), Exe = Str(d, "exe"),
-      Ini = Str(d, "ini"), Section = Str(d, "section", "opcoes"), Play = Str(d, "play"),
-      Setup = Str(d, "setup", "tools/setup.ps1"), Disc = Str(d, "disc", ""), Minutes = Str(d, "minutes", ""),
+      Ini = Str(d, "ini"), Section = Str(d, "section", "opcoes"), Play = OS.ScriptName(Str(d, "play")),
+      Setup = OS.ScriptName(Str(d, "setup", "tools/setup.ps1")), Disc = Str(d, "disc", ""), Minutes = Str(d, "minutes", ""),
       DiskGb = Int(d, "disk_gb"), VulkanDir = Str(d, "vulkan_dir"),
       PlainIni = Str(d, "ini_format") == "plain",
     };
@@ -121,7 +120,17 @@ static class L {
   public static string Mode = Load();
   public static bool Pt = Resolve(Mode);
   static string Load() { string m = Prefs.Text("language", "system"); return m == "pt" || m == "en" ? m : "system"; }
-  static bool Resolve(string m) => m == "pt" || (m == "system" && CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pt");
+  static bool Resolve(string m) => m == "pt" || (m == "system" && SystemPt());
+  // Windows: the display language. Linux / macOS: .NET reads LANG / LC_ALL (and macOS the first preferred language).
+  static bool SystemPt() {
+    if (CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pt") return true;
+    if (OS.Windows) return false;
+    foreach (string v in new[] { "LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE" }) {
+      string x = Environment.GetEnvironmentVariable(v);
+      if (!string.IsNullOrEmpty(x)) return x.StartsWith("pt", StringComparison.OrdinalIgnoreCase);
+    }
+    return false;
+  }
   public static void Set(string m) { Mode = m; Pt = Resolve(m); Prefs.Set("language", m); }
   public static string T(string pt, string en) => Pt ? pt : en;
   public static string T(Setting s) => Pt ? s.Pt : s.En;

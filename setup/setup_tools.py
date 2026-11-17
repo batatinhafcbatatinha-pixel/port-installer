@@ -9,13 +9,16 @@ Prints KEY=VALUE lines for setup.ps1: PATH (folders to put first), LLVM, GHIDRA,
 `--check-pins` compares the submodule pins with the repository's gitlinks (run it before publishing).
 """
 import argparse
+import gzip
 import hashlib
 import json
 import lzma
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -66,6 +69,154 @@ TOOLS = {
 }
 LLVM_NEEDED = ('clang.exe', 'clang++.exe', 'clang-cl.exe', 'lld-link.exe', 'llvm-ar.exe', 'llvm-rc.exe')
 
+# Linux/macOS use the system Clang instead of the large Windows LLVM downloads. The other tools
+# come from the same official releases as the Windows table, pinned to the published SHA-256.
+POSIX_TOOLS = {
+    ('linux', 'x86_64'): {
+        'cmake': {
+            'version': '3.31.12', 'sha256': '0dc2e9a6860f06bf10bd8fadc03e35d9eeb4df46e33763a7e480e987758f385c',
+            'url': GH + 'Kitware/CMake/releases/download/v3.31.12/cmake-3.31.12-linux-x86_64.tar.gz',
+            'check': 'bin/cmake', 'bin': 'bin',
+        },
+        'ninja': {
+            'version': '1.13.2', 'sha256': '5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbead6',
+            'url': GH + 'ninja-build/ninja/releases/download/v1.13.2/ninja-linux.zip',
+            'check': 'ninja', 'bin': '',
+        },
+        'jdk': {
+            'version': '21.0.13', 'sha256': 'd7f5d5cf865a2902b70ff549b97586a7d3f234e016f041ab447ea740c7d66d1c',
+            'url': GH + 'adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.13_9.tar.gz',
+            'check': 'bin/java',
+        },
+        'ghidra': {
+            'version': '12.1.4', 'sha256': 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db',
+            'url': GH + 'NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip',
+            'check': 'support/analyzeHeadless',
+        },
+        'ghidra-ee': {
+            'version': '2.1.39', 'sha256': '088369c4d7de43cc95dbf254936dfed45eae5eddfcaf8b928189344bcc6a4dac',
+            'url': GH + 'chaoticgd/ghidra-emotionengine-reloaded/releases/download/v2.1.39/'
+                        'ghidra_12.1.4_PUBLIC_20261029_ghidra-emotionengine-reloaded.zip',
+            'check': 'extension.properties',
+        },
+    },
+    ('linux', 'aarch64'): {
+        'cmake': {
+            'version': '3.31.12', 'sha256': '83f8fd91d2038a56556e1400390fcfe42f79602940c494f6c6f1cdae7f9e7f40',
+            'url': GH + 'Kitware/CMake/releases/download/v3.31.12/cmake-3.31.12-linux-aarch64.tar.gz',
+            'check': 'bin/cmake', 'bin': 'bin',
+        },
+        'ninja': {
+            'version': '1.13.2', 'sha256': 'fd2cacc8050a7f12a16a2e48f9e06fca5c14fc4c2bee2babb67b58be17a607fc',
+            'url': GH + 'ninja-build/ninja/releases/download/v1.13.2/ninja-linux-aarch64.zip',
+            'check': 'ninja', 'bin': '',
+        },
+        'jdk': {
+            'version': '21.0.13', 'sha256': 'e3522e707fc7dbe2a72c30746b1e7068301a0213ecd213d4491f35a14eb55578',
+            'url': GH + 'adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.13_9.tar.gz',
+            'check': 'bin/java',
+        },
+        'ghidra': {
+            'version': '12.1.4', 'sha256': 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db',
+            'url': GH + 'NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip',
+            'check': 'support/analyzeHeadless',
+        },
+        'ghidra-ee': {
+            'version': '2.1.39', 'sha256': '088369c4d7de43cc95dbf254936dfed45eae5eddfcaf8b928189344bcc6a4dac',
+            'url': GH + 'chaoticgd/ghidra-emotionengine-reloaded/releases/download/v2.1.39/'
+                        'ghidra_12.1.4_PUBLIC_20261029_ghidra-emotionengine-reloaded.zip',
+            'check': 'extension.properties',
+        },
+    },
+    ('darwin', 'arm64'): {
+        'cmake': {
+            'version': '3.31.12', 'sha256': '799af7fd545db9bf1b9cfe72f8095880e727a2d4e0df0e3dffc3bc7b95c2d3b0',
+            'url': GH + 'Kitware/CMake/releases/download/v3.31.12/cmake-3.31.12-macos-universal.tar.gz',
+            'check': 'CMake.app/Contents/bin/cmake', 'bin': 'CMake.app/Contents/bin',
+        },
+        'ninja': {
+            'version': '1.13.2', 'sha256': 'c99048673aa765960a99cf10c6ddb9f1fad506099ff0a0e137ad8960a88f321b',
+            'url': GH + 'ninja-build/ninja/releases/download/v1.13.2/ninja-mac.zip',
+            'check': 'ninja', 'bin': '',
+        },
+        'jdk': {
+            'version': '21.0.13', 'sha256': 'bf036b35b071bfb2f54f2c0af8ee8d88afa95ee6eb3dce02c0f94cfc2524d04a',
+            'url': GH + 'adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.13_9.tar.gz',
+            'check': 'Contents/Home/bin/java',  # the macOS JDK is a bundle
+        },
+        'ghidra': {
+            'version': '12.1.4', 'sha256': 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db',
+            'url': GH + 'NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip',
+            'check': 'support/analyzeHeadless',
+        },
+        'ghidra-ee': {
+            'version': '2.1.39', 'sha256': '088369c4d7de43cc95dbf254936dfed45eae5eddfcaf8b928189344bcc6a4dac',
+            'url': GH + 'chaoticgd/ghidra-emotionengine-reloaded/releases/download/v2.1.39/'
+                        'ghidra_12.1.4_PUBLIC_20261029_ghidra-emotionengine-reloaded.zip',
+            'check': 'extension.properties',
+        },
+    },
+    ('darwin', 'x86_64'): {
+        'cmake': {
+            'version': '3.31.12', 'sha256': '799af7fd545db9bf1b9cfe72f8095880e727a2d4e0df0e3dffc3bc7b95c2d3b0',
+            'url': GH + 'Kitware/CMake/releases/download/v3.31.12/cmake-3.31.12-macos-universal.tar.gz',
+            'check': 'CMake.app/Contents/bin/cmake', 'bin': 'CMake.app/Contents/bin',
+        },
+        'ninja': {
+            'version': '1.13.2', 'sha256': 'c99048673aa765960a99cf10c6ddb9f1fad506099ff0a0e137ad8960a88f321b',
+            'url': GH + 'ninja-build/ninja/releases/download/v1.13.2/ninja-mac.zip',
+            'check': 'ninja', 'bin': '',
+        },
+        'jdk': {
+            'version': '21.0.13', 'sha256': '9aa1d1c17ae5467a022679e7e0af5c00797d94ac462ed1a46f4db07a8a34a6dd',
+            'url': GH + 'adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_mac_hotspot_21.0.13_9.tar.gz',
+            'check': 'Contents/Home/bin/java',  # the macOS JDK is a bundle
+        },
+        'ghidra': {
+            'version': '12.1.4', 'sha256': 'ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db',
+            'url': GH + 'NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip',
+            'check': 'support/analyzeHeadless',
+        },
+        'ghidra-ee': {
+            'version': '2.1.39', 'sha256': '088369c4d7de43cc95dbf254936dfed45eae5eddfcaf8b928189344bcc6a4dac',
+            'url': GH + 'chaoticgd/ghidra-emotionengine-reloaded/releases/download/v2.1.39/'
+                        'ghidra_12.1.4_PUBLIC_20261029_ghidra-emotionengine-reloaded.zip',
+            'check': 'extension.properties',
+        },
+    },
+}
+
+
+def platform_key():
+    machine = platform.machine().lower()
+    if machine in ('amd64', 'x86_64'):
+        machine = 'x86_64'
+    elif machine in ('arm64', 'aarch64'):
+        machine = 'arm64' if sys.platform == 'darwin' else 'aarch64'
+    return sys.platform, machine
+
+
+def tools_table():
+    """The pinned table for this OS; Windows keeps the original TOOLS unchanged."""
+    if os.name == 'nt':
+        return TOOLS
+    key = platform_key()
+    if key not in POSIX_TOOLS:
+        raise ValueError(f'Unsupported platform for portable tools: {key[0]} {key[1]}')
+    return POSIX_TOOLS[key]
+
+
+def system_llvm():
+    """On POSIX, LLVM is the system Clang: return (LLVM prefix, directory with its binaries)."""
+    clang = shutil.which('clang')
+    clangpp = shutil.which('clang++')
+    if not clang or not clangpp:
+        raise ValueError('System Clang is required: install clang and clang++ (on macOS, the Command Line Tools)')
+    resolved = Path(clang).resolve()
+    prefix, binary_dir = resolved.parent.parent, resolved.parent
+    log(f'Using system Clang from {binary_dir}')
+    return prefix, binary_dir
+
 
 def log(text):
     print(text, file=sys.stderr, flush=True)
@@ -108,8 +259,12 @@ def download(url, target, sha256=None):
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(target.name + '.part')
     # Windows' own curl.exe uses the system certificate store fully (Python's ssl may miss intermediates).
-    curl = shutil.which('curl.exe') if os.name == 'nt' else None
-    if not (curl and subprocess.run([curl, '-L', '--fail', '--retry', '3', '--progress-bar', '-o', str(partial), url]).returncode == 0):
+    # Linux / macOS: the system's curl, which resumes a broken download (-C -) and retries a stalled one.
+    curl = shutil.which('curl.exe') if os.name == 'nt' else shutil.which('curl')
+    command = [curl, '-L', '--fail', '--retry', '3', '--progress-bar', '-o', str(partial), url] if os.name == 'nt' else \
+              [curl, '-L', '--fail', '--retry', '8', '--retry-all-errors', '--retry-delay', '3', '-C', '-',
+               '--speed-limit', '10000', '--speed-time', '60', '-sS', '-o', str(partial), url]
+    if not (curl and subprocess.run(command, **({} if os.name == 'nt' else {'stdout': sys.stderr})).returncode == 0):
         request = urllib.request.Request(url, headers={'User-Agent': 'port-setup'})
         with urllib.request.urlopen(request, timeout=60) as response, partial.open('wb') as out:
             total = int(response.headers.get('Content-Length') or 0)
@@ -126,20 +281,50 @@ def download(url, target, sha256=None):
     partial.replace(target)
 
 
+def extract_tar(tar, folder):
+    try:
+        tar.extractall(folder, filter='data')
+    except TypeError:  # Python without extraction filters
+        tar.extractall(folder)
+
+
+def restore_zip_modes(zip_file, folder):
+    """zipfile drops the POSIX mode: give each file the permissions stored in the archive (Ghidra's scripts,
+    its native decompiler, the JDK's programs), when the archive was made on a POSIX system."""
+    for info in zip_file.infolist():
+        mode = (info.external_attr >> 16) & 0o777
+        if mode and not info.is_dir():
+            path = folder / info.filename
+            if path.is_file():
+                path.chmod(mode | stat.S_IRUSR | stat.S_IWUSR)
+
+
+def fix_executable_bits(folder):
+    """zipfile drops the POSIX mode; restore the bits needed to run tools (archives made without modes)."""
+    for path in folder.rglob('*'):
+        if path.is_file() and (path.parent.name == 'bin' or path.name in ('ninja', 'analyzeHeadless') or path.suffix == '.sh' or
+                               any(part.startswith(('linux_', 'mac_')) for part in path.parent.parts[-1:])):
+            path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
 def extract(archive, folder):
-    """Unpack into folder; an archive with a single top folder is unwrapped."""
+    """Unpack zip, tar.gz or tar.xz into folder; unwrap a single top folder."""
     temp = folder.with_name(folder.name + '.extracting')
     shutil.rmtree(temp, ignore_errors=True)
     temp.mkdir(parents=True)
     if archive.name.endswith('.zip'):
         with zipfile.ZipFile(archive) as z:
             z.extractall(temp)
+            if os.name != 'nt':
+                restore_zip_modes(z, temp)
+        if os.name != 'nt':
+            fix_executable_bits(temp)
+    elif archive.name.endswith(('.tar.gz', '.tgz')):
+        with gzip.open(archive) as gz, tarfile.open(fileobj=gz, mode='r|') as tar:
+            extract_tar(tar, temp)
     else:
         with lzma.open(archive) as xz, tarfile.open(fileobj=xz, mode='r|') as tar:
-            try:
-                tar.extractall(temp, filter='data')
-            except TypeError:  # Python without extraction filters
-                tar.extractall(temp)
+            extract_tar(tar, temp)
     entries = list(temp.iterdir())
     inner = entries[0] if len(entries) == 1 and entries[0].is_dir() else temp
     folder.parent.mkdir(parents=True, exist_ok=True)
@@ -148,8 +333,8 @@ def extract(archive, folder):
     shutil.rmtree(temp, ignore_errors=True)
 
 
-def ensure(name, folder):
-    tool = TOOLS[name]
+def ensure(name, folder, table=None):
+    tool = (table or TOOLS)[name]
     if (folder / tool['check']).is_file():
         return folder
     archive = folder.parent / Path(tool['url'].replace('%2B', '+')).name
@@ -163,11 +348,14 @@ def ensure(name, folder):
     return folder
 
 
-def ghidra(base):
-    jdk = ensure('jdk', base / 'jdk-21')
-    home = ensure('ghidra', base / f'ghidra-{TOOLS["ghidra"]["version"]}')
+def ghidra(base, table=None):
+    table = table or TOOLS
+    jdk = ensure('jdk', base / 'jdk-21', table)
+    home = ensure('ghidra', base / f'ghidra-{table["ghidra"]["version"]}', table)
+    if (jdk / 'Contents/Home').is_dir():   # macOS: JAVA_HOME is the bundle's Contents/Home
+        jdk = jdk / 'Contents/Home'
     # Extensions under Ghidra/Extensions of the install are loaded for every user, headless included.
-    ensure('ghidra-ee', home / 'Ghidra/Extensions/ghidra-emotionengine-reloaded')
+    ensure('ghidra-ee', home / 'Ghidra/Extensions/ghidra-emotionengine-reloaded', table)
     # Point Ghidra at this JDK so it never asks for one.
     props = home / 'support/launch.properties'
     text = props.read_text(encoding='utf-8')
@@ -221,22 +409,31 @@ def main():
     base.mkdir(parents=True, exist_ok=True)
     submodules(config)
     wanted = config.get('tools', [])
+    table = tools_table()
+    posix = os.name != 'nt'
     path, result = [], {}
-    if 'llvm' in wanted:
-        llvm = existing_llvm() or ensure('llvm', base / f'llvm-{TOOLS["llvm"]["version"]}')
+    if posix and ('llvm' in wanted or 'llvm-mingw' in wanted):
+        llvm_prefix, llvm_bin = system_llvm()
+        path.append(llvm_bin)
+        result['CC'], result['CXX'] = 'clang', 'clang++'
+        result['LLVM'] = llvm_prefix
+    if 'llvm' in wanted and not posix:
+        llvm = existing_llvm() or ensure('llvm', base / f'llvm-{table["llvm"]["version"]}', table)
         path.append(llvm / 'bin')
         result['LLVM'] = llvm
-    if 'llvm-mingw' in wanted:
-        mingw = ensure('llvm-mingw', base / f'llvm-mingw-{TOOLS["llvm-mingw"]["version"]}')
+    if 'llvm-mingw' in wanted and not posix:
+        mingw = ensure('llvm-mingw', base / f'llvm-mingw-{table["llvm-mingw"]["version"]}', table)
         path.append(mingw / 'bin')
         result['CC'], result['CXX'] = 'clang', 'clang++'
     for name in ('cmake', 'ninja'):
         if name in wanted:
-            folder = ensure(name, base / f'{name}-{TOOLS[name]["version"]}')
-            path.append(folder / ('bin' if name == 'cmake' else ''))
+            folder = ensure(name, base / f'{name}-{table[name]["version"]}', table)
+            relative = table[name].get('bin', 'bin' if name == 'cmake' else '')
+            path.append(folder / relative if relative else folder)
     if 'ghidra' in wanted:
-        result['GHIDRA'], result['JAVA_HOME'] = ghidra(base)
-    print('PATH=' + ';'.join(str(p) for p in path))
+        result['GHIDRA'], result['JAVA_HOME'] = ghidra(base, table)
+    separator = ';' if os.name == 'nt' else os.pathsep
+    print('PATH=' + separator.join(str(p) for p in path))
     for key, value in result.items():
         print(f'{key}={value}')
 

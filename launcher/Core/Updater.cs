@@ -10,16 +10,15 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
-using System.Web.Script.Serialization;
-using System.Windows.Forms;
 
 namespace PortLauncher {
 
 enum UpdateChannel { Stable, Nightly }
 
 sealed class LauncherRelease {
-  public string Tag, Url, Commit, Date;
+  public string Tag, Url, Commit, Date, Page;   // Page: the release on GitHub (Linux/macOS builds that cannot replace themselves)
   public Version Version;
   public string Display => Tag == "nightly" ? "nightly " + (Commit ?? "").Substring(0, Math.Min(7, (Commit ?? "").Length)) : Tag;
 }
@@ -53,7 +52,20 @@ static class Updater {
   static string Short(string sha) => sha.Length > 7 ? sha.Substring(0, 7) : sha;
 
   // A launcher with its game's launcher.json built in (a single-game kit) is not the generic release: it is not replaced.
-  public static bool CanReplaceSelf => Assembly.GetExecutingAssembly().GetManifestResourceStream("launcher.json") == null;
+  // Windows replaces Launcher.exe; Linux replaces the AppImage it runs from. A .tar.gz copy on Linux and the macOS .app
+  // are updated by downloading the new build (the update bar opens the release page).
+  public static bool CanReplaceSelf => Assembly.GetExecutingAssembly().GetManifestResourceStream("launcher.json") == null &&
+                                       (OS.Windows || OS.Linux && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("APPIMAGE")));
+
+  // The release asset of this system's launcher (CI uploads all of them).
+  public static string AssetName {
+    get {
+      if (OS.Windows) return "Launcher.exe";
+      string arch = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "x64";
+      if (OS.Mac) return "Launcher-macos.zip";
+      return !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("APPIMAGE")) ? "Launcher-linux-" + arch + ".AppImage" : "Launcher-linux-" + arch + ".tar.gz";
+    }
+  }
 
   static WebClient Web() {
     var web = new WebClient();
@@ -64,7 +76,7 @@ static class Updater {
 
   internal static IDictionary<string, object> Api(string path) {
     using (var web = Web())
-      return new JavaScriptSerializer().DeserializeObject(web.DownloadString("https://api.github.com/" + path)) as IDictionary<string, object>;
+      return Json.Parse(web.DownloadString("https://api.github.com/" + path)) as IDictionary<string, object>;
   }
 
   static string S(IDictionary<string, object> d, string k) => d != null && d.TryGetValue(k, out var v) && v != null ? Convert.ToString(v) : null;
@@ -74,10 +86,10 @@ static class Updater {
     IDictionary<string, object> rel;
     try { rel = Api("repos/" + LauncherRepo + (channel == UpdateChannel.Nightly ? "/releases/tags/nightly" : "/releases/latest")); }
     catch (WebException ex) when ((ex.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.NotFound) { return null; }
-    var r = new LauncherRelease { Tag = S(rel, "tag_name"), Date = S(rel, "published_at") };
+    var r = new LauncherRelease { Tag = S(rel, "tag_name"), Date = S(rel, "published_at"), Page = S(rel, "html_url") };
     if (rel.TryGetValue("assets", out var assets) && assets is object[] list)
       foreach (var a in list.OfType<IDictionary<string, object>>())
-        if (string.Equals(S(a, "name"), "Launcher.exe", StringComparison.OrdinalIgnoreCase)) r.Url = S(a, "browser_download_url");
+        if (string.Equals(S(a, "name"), AssetName, StringComparison.OrdinalIgnoreCase)) r.Url = S(a, "browser_download_url");
     var m = Regex.Match(S(rel, "body") ?? "", @"commit:\s*([0-9a-f]{7,40})", RegexOptions.IgnoreCase);
     if (m.Success) r.Commit = m.Groups[1].Value.ToLowerInvariant();
     m = Regex.Match(S(rel, "body") ?? "", @"version:\s*(\d+\.\d+\.\d+(\.\d+)?)", RegexOptions.IgnoreCase);
@@ -96,15 +108,18 @@ static class Updater {
     return r.Version != null && r.Version > Version;
   }
 
-  // Downloads the new Launcher.exe next to this one and swaps them (a running exe can be renamed, not overwritten).
+  // Downloads the new Launcher.exe (Linux: AppImage) next to this one and swaps them (a running program can be renamed, not overwritten).
   public static void ReplaceSelf(LauncherRelease r, Action<string> log) {
-    string exe = Application.ExecutablePath, next = exe + ".new", old = exe + ".old";
+    string exe = OS.ExePath, next = exe + ".new", old = exe + ".old";
     log?.Invoke(L.T("Baixando ", "Downloading ") + r.Url);
     using (var web = Web()) { web.Headers.Remove(HttpRequestHeader.Accept); web.DownloadFile(r.Url, next); }
     var head = new byte[2];
     using (var f = File.OpenRead(next)) {
-      if (f.Length < 64 * 1024 || f.Read(head, 0, 2) != 2 || head[0] != 'M' || head[1] != 'Z') { f.Close(); File.Delete(next); throw new IOException("Launcher.exe: not a Windows program"); }
+      bool ok = OS.Windows ? f.Length >= 64 * 1024 && f.Read(head, 0, 2) == 2 && head[0] == 'M' && head[1] == 'Z'
+                           : f.Length >= 64 * 1024 && f.Read(head, 0, 2) == 2 && head[0] == 0x7F && head[1] == 'E';
+      if (!ok) { f.Close(); File.Delete(next); throw new IOException(AssetName + ": not a " + OS.Name + " program"); }
     }
+    Shortcuts.MakeExecutable(next);
     if (File.Exists(old)) File.Delete(old);
     File.Move(exe, old);
     try { File.Move(next, exe); } catch (Exception) { File.Move(old, exe); throw; }
@@ -113,11 +128,11 @@ static class Updater {
 
   public static void Relaunch() {
     var args = Environment.GetCommandLineArgs().Skip(1).Select(a => a.Contains(' ') ? "\"" + a + "\"" : a);
-    Process.Start(new ProcessStartInfo(Application.ExecutablePath, string.Join(" ", args)) { UseShellExecute = false });
+    Process.Start(new ProcessStartInfo(OS.ExePath, string.Join(" ", args)) { UseShellExecute = false });
   }
 
   public static void CleanUp() {
-    try { string old = Application.ExecutablePath + ".old"; if (File.Exists(old)) File.Delete(old); } catch (Exception) { }
+    try { string old = OS.ExePath + ".old"; if (File.Exists(old)) File.Delete(old); } catch (Exception) { }
   }
 
   // ------------------------------------------------------------------ the recompiler's source

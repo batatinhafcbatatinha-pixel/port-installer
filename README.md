@@ -12,8 +12,12 @@ Nothing from any game is in this repository or in its releases: the game always 
    - the release ZIP of a recompiler, from that recompiler's own releases (for example
      [PS2Recomp-windows.zip](https://github.com/batatinhafcbatatinha-pixel/PS2Recomp/releases/latest/download/PS2Recomp-windows.zip)):
      unzip it and open `Launcher.exe` at its root; or
-   - [`Launcher.exe`](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases/latest/download/Launcher.exe)
-     alone (the only asset of this repository's releases; Windows): get recompilers from **Recompilers** (toolbar or Ctrl+R).
+   - the launcher alone, from this repository's releases, then get recompilers from **Recompilers** (toolbar or Ctrl+R):
+     [`Launcher.exe`](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases/latest/download/Launcher.exe) (Windows),
+     [`Launcher-linux-x64.AppImage`](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases/latest/download/Launcher-linux-x64.AppImage) or
+     [`.tar.gz`](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases/latest/download/Launcher-linux-x64.tar.gz) (Linux),
+     [`Launcher-macos.zip`](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases/latest/download/Launcher-macos.zip) (macOS);
+     see [Linux and macOS](#linux-and-macos).
    - Developers: `git clone --recurse-submodules` a recompiler and run `Launcher.cmd`.
 2. The library starts empty. Click **ADD A GAME FOLDER** and pick one or more folders with your discs (`.iso` images or
    extracted discs; subfolders are searched too). Each disc's console is recognised (PS2 `SYSTEM.CNF`, PSP `UMD_DATA.BIN`,
@@ -59,13 +63,61 @@ PC settings and dependencies open in their own windows; the log is also in `game
 `tools/ps5port` converts the executable and modules with the AnyPS5 relinker in a few minutes; no C++ Build Tools are
 needed (setup.json `"buildtools": false`). The PC settings become AnyPS5 variables when the game starts.
 
+## Linux and macOS
+
+The same launcher (library with console tabs, recompilers, patches and cheats, PC settings, dependencies, Portuguese or
+English) runs on Linux and macOS as a native program: the window is drawn with [Avalonia](https://avaloniaui.net/) and the
+program is compiled ahead of time (.NET NativeAOT), so nothing else is installed to run it. Windows keeps its
+Windows Forms launcher; both share the logic in `launcher/Core`.
+
+**Linux (x86-64).** Download
+[`Launcher-linux-x64.AppImage`](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases/latest/download/Launcher-linux-x64.AppImage),
+then `chmod +x Launcher-linux-x64.AppImage && ./Launcher-linux-x64.AppImage` (or open it from the file manager; distributions
+without FUSE 2 run it with `APPIMAGE_EXTRACT_AND_RUN=1`). The
+[`.tar.gz`](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases/latest/download/Launcher-linux-x64.tar.gz)
+holds the same program unpacked: `tar xzf Launcher-linux-x64.tar.gz && port-launcher/install.sh` puts it in
+`~/.local/share/port-launcher` and in the applications menu (no administrator). Built on Ubuntu 22.04: any distribution with
+glibc 2.35 or newer, X11 or XWayland. Preferences: `~/.config/port-launcher`, caches: `~/.cache/port-launcher` (XDG).
+The AppImage updates itself (Updates menu); the `.tar.gz` copy shows the new version and its download.
+
+**macOS 11 or newer (Apple Silicon and Intel).** Download
+[`Launcher-macos.zip`](https://github.com/batatinhafcbatatinha-pixel/port-installer/releases/latest/download/Launcher-macos.zip),
+unzip it and move **Port Launcher.app** to Applications. It is not notarized: the first time, Control-click it and choose
+**Open** (or run `xattr -dr com.apple.quarantine "/Applications/Port Launcher.app"`). The menus are in the system menu bar.
+Preferences: `~/Library/Application Support/port-launcher`, caches: `~/Library/Caches/port-launcher`. A new version is
+offered in the Updates menu as a download.
+
+What differs from Windows:
+
+- The setup is `setup/setup.sh` (bash) + `setup/setup_posix.py`, the same five steps as `setup.ps1`: Python 3.11+ with Tk,
+  the compiler and libraries (Linux: the packages a recompiler lists for apt, dnf, pacman or zypper, installed with
+  `pkexec`/`sudo`; macOS: Apple's Command Line Tools and the Homebrew packages it lists), the portable tools of
+  `setup_tools.py` (CMake, Ninja, Java, Ghidra for Linux x86-64/arm64 and macOS, SHA-256 pinned; the compiler is the
+  system's Clang), your game files (`installer.json` `"mode": "link"` makes `game_files` a symlink) and the build.
+- Games start with `Play.sh` next to `Play.cmd`; desktop shortcuts are a `.desktop` entry (Linux: applications menu and
+  desktop) or a small app on the desktop (macOS).
+- A recompiler says it runs on a system with a block in its `launcher.json` (`"linux": {...}`, `"macos": {...}`: the
+  executable, the packages, the dependency checks of that system; its keys replace the top-level ones there). Without it,
+  and for games whose `setup.json` build steps are Windows scripts (`cmd /c ...`), the library shows **No version for
+  Linux / macOS** and explains it instead of trying. `recomps.json` lists the systems of each recompiler the launcher can
+  download (`"platforms"`).
+- Today: PS2Recomp declares Linux and macOS; its games built with `tools/ps2port` (and discs without a profile, the generic
+  path) install on them. The other recompilers (xboxrecomp, rexglue-ports, PSPRecomp, AnyPS5) are Windows only for now.
+- The Windows graphics-card preference and the DXGI card list are Windows only; the monitor list comes from the window
+  system and the refresh rates from `xrandr` (Linux).
+
 ## What is here
 
 | Path | What |
 | --- | --- |
+| `launcher/Core/` | The launcher's logic shared by the Windows and the Linux/macOS programs (configuration, recompilers, library, patches, updates, per-system parts in `Platform.cs`, a small JSON reader). |
+| `launcher-avalonia/` | The Linux/macOS launcher (Avalonia 11, .NET 8 NativeAOT): the same windows as `launcher/`, drawn with the same colours and icons. |
+| `launcher-tests/` | C# unit tests of `launcher/Core` (run by `tests/test_launcher_core.py` and by CI on Windows, Linux and macOS). |
+| `tools/package_launcher.sh` | Packages the Linux build (AppImage, `.tar.gz` with `install.sh`) and the macOS build (universal `.app` in a ZIP). |
 | `launcher/` | `Launcher.exe` source (C#, .NET Framework 4.8, built by CI). Recompiler mode: finds `launcher.json` with `games_dir` in its folder or a parent (or `--root`), lists `games/*/setup.json`, `--game <id>` opens one. Kit mode: `launcher.json` next to it or built in. Library mode: one library for every recompiler installed (`%APPDATA%\port-launcher\recomps.txt`, the one it sits in added by itself; more from `recomps.json` in the Recompilers window). |
 | `tools/make_bundle.py` | Builds a recompiler's player ZIP: source + `Launcher.exe` + Python (python-build-standalone, pinned) + CMake/Ninja (pins of `setup/setup_tools.py`), for a local build; releases no longer carry these bundles (each recompiler's own release workflow makes its ZIPs). |
 | `setup/setup.ps1`, `setup/setup_tools.py` | The install and build steps (shared by every port). `-GameDir` = one game folder, `-ToolsDir` = shared tools, `-Source` = the disc image; `-Only python\|buildtools\|tools\|game`. |
+| `setup/setup.sh`, `setup/setup_posix.py` | The same steps on Linux and macOS: `--game-dir`, `--tools-dir`, `--source`, `--only ...`, `--yes`. |
 | `installer.py`, `engine.py`, `media.py`, `layout.py` | Game-file installer: ISO 9660 (PS2) and XDVDFS (Xbox/360) or a folder, SHA-256 check against `installer.json`, progress, resume. `--source` starts at once. |
 | `prepare_folder.py` | Sector layout for an extracted folder (`game_files/.disc/`), used by the PS2 runtime instead of an ISO. |
 | `runtime/` | CMake glue that makes the PS2Recomp CD readers use the extracted folder. |
@@ -82,14 +134,20 @@ submodule folder is empty (ZIP download), the launcher writes its own copy of th
 
 ```sh
 python -m unittest discover -s tests -v
-dotnet build launcher/Launcher.csproj -c Release -o build/launcher
+dotnet build launcher/Launcher.csproj -c Release -o build/launcher                    # Windows
+dotnet publish launcher-avalonia/Launcher.Avalonia.csproj -c Release -r linux-x64 -o build/linux   # on Linux (clang, zlib1g-dev)
+dotnet publish launcher-avalonia/Launcher.Avalonia.csproj -c Release -r osx-arm64 -o build/macos   # on macOS (Xcode tools)
+bash tools/package_launcher.sh linux build/linux dist
 ```
 
 Test aids: `Launcher.exe --root <recomp> --game <id> --shot out.png [--shot-tab N] [--theme dark|light]` renders the window
 to a PNG (tab 0 library, 1 dependencies, 2 log, 3 PC settings, 4 list view); `--detect <iso or folder> out.txt` writes the
 boot executable and the matching game; `--check-updates out.txt` writes what each update channel offers;
-`PORT_LAUNCHER_HOME=<folder>` keeps preferences, game folders and caches there instead of the user profile. A tag `v*`
-publishes `Launcher.exe` as a release (version from the tag); every push to `main` replaces the `nightly` pre-release.
+`PORT_LAUNCHER_HOME=<folder>` keeps preferences, game folders and caches there instead of the user profile; `--left`
+opens the window at the left edge. The Linux/macOS launcher also has `--list out.txt` (the library after one scan, no window)
+and `--install <key> --install-log out.txt [--only part]` (installs one game with every question answered yes).
+A tag `v*` publishes `Launcher.exe`, `Launcher-linux-x64.AppImage`, `Launcher-linux-x64.tar.gz` and `Launcher-macos.zip`
+as a release (version from the tag); every push to `main` replaces the `nightly` pre-release with the same files.
 
 ## Single-game kits (older ports)
 

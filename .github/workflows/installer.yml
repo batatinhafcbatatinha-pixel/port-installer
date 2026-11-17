@@ -15,6 +15,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      # The .NET SDK lets tests/test_launcher_core.py run the C# tests of the launcher's shared logic too.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
       - run: python -m unittest discover -s tests -v
   windows:
     runs-on: windows-latest
@@ -31,6 +35,8 @@ jobs:
           path: dist/Instalar-Arquivos.exe
   launcher:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.build.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,7 +47,8 @@ jobs:
       # .NET Framework 4.8 (part of Windows 10 and 11): the player installs nothing to run it.
       # Version: the tag (v0.4.0 -> 0.4.0), or for every other build the newest tag plus the run number
       # (0.4.0.57), so the launcher's update channels can tell builds apart; the commit goes in too.
-      - shell: pwsh
+      - id: build
+        shell: pwsh
         run: |
           if ($env:GITHUB_REF -like 'refs/tags/v*') { $v = $env:GITHUB_REF_NAME.Substring(1) }
           else {
@@ -50,39 +57,136 @@ jobs:
             $v = "$base.$env:GITHUB_RUN_NUMBER"
           }
           "VERSION=$v" >> $env:GITHUB_ENV
+          "version=$v" >> $env:GITHUB_OUTPUT
           dotnet build launcher/Launcher.csproj -c Release -o dist -p:Version=$v -p:SourceRevisionId=$env:GITHUB_SHA
+      # The shared logic's C# tests on Windows.
+      - run: dotnet run -c Release --project launcher-tests
       - uses: actions/upload-artifact@v4
         with:
           name: Launcher
           path: dist/Launcher.exe
-      # Nightly channel: every push to main replaces the "nightly" pre-release with this build.
-      - if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
+  # Linux: the Avalonia launcher compiled ahead of time into a native program (no .NET to install). Built on the
+  # oldest supported Ubuntu so the program runs on older glibc too. Proof: the C# tests, a run that reads the
+  # library (--list) and a picture of the window drawn under Xvfb.
+  launcher-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev xvfb libfontconfig1 libice6 libsm6 libfuse2
+      - name: Version
         run: |
-          notes="Nightly build of the launcher (the newest commit; may be less tested than a release).
-          commit: $GITHUB_SHA
-          version: $VERSION
-          Source code only; nothing from any game."
-          gh release delete nightly -R "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
-          gh release create nightly dist/Launcher.exe -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" --title "Nightly ($VERSION)" --notes "$notes"
-  # A release carries one asset: Launcher.exe (Windows; the launcher is a .NET Framework 4.8 WinForms program and
-  # has no Linux or macOS build). Each recompiler publishes its own release ZIPs, which fetch this Launcher.exe
-  # from releases/latest of this repository.
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, launcher]
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"
+          else tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true); base="${tag#v}"; v="${base:-0.1.0}.$GITHUB_RUN_NUMBER"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+      - run: dotnet run -c Release --project launcher-tests
+      - run: dotnet publish launcher-avalonia/Launcher.Avalonia.csproj -c Release -r linux-x64 -o publish -p:Version=$VERSION -p:SourceRevisionId=$GITHUB_SHA
+      - name: Smoke test
+        run: |
+          export PORT_LAUNCHER_HOME="$RUNNER_TEMP/home"
+          mkdir -p "$PORT_LAUNCHER_HOME"
+          ./publish/Launcher --list list.txt && cat list.txt
+          xvfb-run -a -s "-screen 0 1400x900x24" ./publish/Launcher --shot launcher-linux.png --shot-wait 5 --lang en
+          test -s launcher-linux.png
+      - run: bash tools/package_launcher.sh linux publish dist "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Launcher-linux
+          path: |
+            dist/Launcher-linux-x64.tar.gz
+            dist/Launcher-linux-x64.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-linux
+          path: launcher-linux.png
+  # macOS: the same program for Apple Silicon and Intel (one universal .app). No Mac was used to make it: CI builds
+  # it, runs the C# tests and starts the packaged program without a window (--list, --check-updates).
+  launcher-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"
+          else tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true); base="${tag#v}"; v="${base:-0.1.0}.$GITHUB_RUN_NUMBER"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+      - run: dotnet run -c Release --project launcher-tests
+      - run: dotnet publish launcher-avalonia/Launcher.Avalonia.csproj -c Release -r osx-arm64 -o publish-arm64 -p:Version=$VERSION -p:SourceRevisionId=$GITHUB_SHA
+      - run: dotnet publish launcher-avalonia/Launcher.Avalonia.csproj -c Release -r osx-x64 -o publish-x64 -p:Version=$VERSION -p:SourceRevisionId=$GITHUB_SHA
+      - run: bash tools/package_launcher.sh macos publish-arm64 dist "$VERSION" publish-x64
+      - name: Smoke test
+        run: |
+          ditto -x -k dist/Launcher-macos.zip app
+          export PORT_LAUNCHER_HOME="$RUNNER_TEMP/home"
+          mkdir -p "$PORT_LAUNCHER_HOME"
+          "app/Port Launcher.app/Contents/MacOS/Launcher" --list list.txt && cat list.txt
+          "app/Port Launcher.app/Contents/MacOS/Launcher" --check-updates updates.txt && cat updates.txt
+      - name: Window picture (best effort; the runner may have no screen session)
+        continue-on-error: true
+        run: |
+          export PORT_LAUNCHER_HOME="$RUNNER_TEMP/home"
+          "app/Port Launcher.app/Contents/MacOS/Launcher" --shot "$PWD/launcher-macos.png" --shot-wait 5 --lang en &
+          pid=$!; for i in $(seq 1 60); do [ -s launcher-macos.png ] && break; sleep 1; done; kill $pid 2>/dev/null || true
+          test -s launcher-macos.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Launcher-macos
+          path: dist/Launcher-macos.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshot-macos
+          path: launcher-macos.png
+          if-no-files-found: ignore
+  # Nightly channel: every push to main replaces the "nightly" pre-release with this build (Windows, Linux, macOS).
+  nightly:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [launcher, launcher-linux, launcher-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Launcher
+          pattern: Launcher*
           path: assets
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la assets
+          version="${{ needs.launcher.outputs.version }}"
+          notes="Nightly build of the launcher (the newest commit; may be less tested than a release).
+          commit: $GITHUB_SHA
+          version: $version
+          Launcher.exe: Windows 10/11. Launcher-linux-x64.AppImage or .tar.gz: Linux x86-64. Launcher-macos.zip: macOS 11+ (Apple Silicon and Intel).
+          Source code only; nothing from any game."
+          gh release delete nightly -R "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create nightly assets/* -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" --title "Nightly ($version)" --notes "$notes"
+  # A release carries the launcher of each system: Launcher.exe (Windows, .NET Framework 4.8 WinForms),
+  # Launcher-linux-x64.AppImage / .tar.gz (Linux) and Launcher-macos.zip (macOS), each built by CI from this
+  # repository. Each recompiler's own release ZIPs fetch them from releases/latest of this repository.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, launcher, launcher-linux, launcher-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Launcher*
+          path: assets
+          merge-multiple: true
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
-              --notes "Launcher.exe: the port launcher for Windows 10/11 (.NET Framework 4.8, nothing to install). Each recompiler's own release ZIP (PS2Recomp, PSPRecomp, xboxrecomp, rexglue-ports) already holds this launcher. Source code only; nothing from any game."
-          gh release upload "$GITHUB_REF_NAME" assets/Launcher.exe -R "$GITHUB_REPOSITORY" --clobber
+              --notes "Launcher.exe: Windows 10/11 (.NET Framework 4.8, nothing to install). Launcher-linux-x64.AppImage (one file) or .tar.gz: Linux x86-64. Launcher-macos.zip: macOS 11+, Apple Silicon and Intel. Each recompiler's own release ZIP (PS2Recomp, PSPRecomp, xboxrecomp, rexglue-ports) already holds the launcher. Source code only; nothing from any game."
+          gh release upload "$GITHUB_REF_NAME" assets/* -R "$GITHUB_REPOSITORY" --clobber

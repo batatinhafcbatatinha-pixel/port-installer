@@ -25,14 +25,13 @@
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Net.Http" />
-    <Reference Include="System.Web.Extensions" />
     <EmbeddedResource Include="$(GameConfig)" LogicalName="launcher.json" Condition="'$(GameConfig)' != ''" />
     <!-- Recompiler mode: the recompilers it can download, and this repository's setup scripts and game-file
          installer, written into tools/port-installer of a recompiler download that lacks them. -->
     <EmbeddedResource Include="recomps.json" LogicalName="recomps.json" />
     <EmbeddedResource Include="../*.py" LogicalName="pi/%(Filename)%(Extension)" />
     <EmbeddedResource Include="../LICENSE" LogicalName="pi/LICENSE" />
-    <EmbeddedResource Include="../setup/*.ps1;../setup/*.py" LogicalName="pi/setup/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../setup/*.ps1;../setup/*.sh;../setup/*.py" LogicalName="pi/setup/%(Filename)%(Extension)" />
     <EmbeddedResource Include="../runtime/*.py;../runtime/*.cmake;../runtime/*.h" LogicalName="pi/runtime/%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

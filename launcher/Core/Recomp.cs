@@ -11,12 +11,12 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Web.Script.Serialization;
 
 namespace PortLauncher {
 
 sealed class RecompGame {
   public string Id, Dir, Name, Disc;
+  public bool Supported = true;   // builds and runs on this system (its recompiler does and setup.json does not say "linux": false)
   public HashSet<string> Executables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);  // disc file names of installer.json required_files
   public Dictionary<string, string> Required = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);  // path -> SHA-256
   public Dictionary<string, long> Sizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);         // expected_files
@@ -24,6 +24,7 @@ sealed class RecompGame {
 
 sealed class Recomp {
   public string Root, Name, Repo, Branch, Setup, ToolsDir, LauncherJson;
+  public bool Supported = true;                  // runs on this system (launcher.json has its "linux"/"macos" block; see OS.Supports)
   public List<RecompGame> Games = new List<RecompGame>();
   public IDictionary<string, object> Generic;   // launcher.json "generic": setup.json template for discs with no profile
   public string CoverUrl;                        // launcher.json "cover_url": cover pictures by disc serial ({serial} = SLUS-21423)
@@ -37,7 +38,7 @@ sealed class Recomp {
     byte[] param = ReadDiscFile(path, "sce_sys/param.json");
     if (param == null) return null;
     try {
-      var d = (IDictionary<string, object>)new JavaScriptSerializer().DeserializeObject(Encoding.UTF8.GetString(param).TrimStart('﻿'));
+      var d = PortLauncher.Json.Object(Encoding.UTF8.GetString(param).TrimStart('﻿'));
       string id = Str(d, "titleId");
       if (d.TryGetValue("localizedParameters", out var lp) && lp is IDictionary<string, object> loc) {
         string def = Str(loc, "defaultLanguage", "en-US");
@@ -63,17 +64,24 @@ sealed class Recomp {
     var setup = new Dictionary<string, object>(Generic);
     setup["game"] = title;
     setup["disc"] = "PlayStation 2 (" + boot + ")";
-    var js = new JavaScriptSerializer();
-    File.WriteAllText(Path.Combine(dir, "setup.json"), js.Serialize(setup));
+        File.WriteAllText(Path.Combine(dir, "setup.json"), PortLauncher.Json.Write(setup));
     var installer = new Dictionary<string, object> {
       ["schema"] = 1, ["name"] = title, ["revision"] = boot, ["filesystem"] = "iso9660", ["destination"] = "game_files",
       ["required_files"] = new Dictionary<string, object> { ["SYSTEM.CNF"] = Sha256(cnf).ToLowerInvariant(), [boot] = Sha256(elf).ToLowerInvariant() },
       ["required_paths"] = new object[0],
     };
-    File.WriteAllText(Path.Combine(dir, "installer.json"), js.Serialize(installer));
+    File.WriteAllText(Path.Combine(dir, "installer.json"), PortLauncher.Json.Write(installer));
     File.WriteAllText(Path.Combine(dir, "Play.cmd"),
         "@echo off\r\nrem Starts this game (built by the launcher with tools/ps2port).\r\n" +
         "python \"%~dp0..\\..\\..\\tools\\ps2port\\ps2port.py\" play --port \"%~dp0.\"\r\nexit /b %errorlevel%\r\n");
+    if (!OS.Windows) {
+      // Linux / macOS: the same start script for bash (setup.json keeps "play": "Play.cmd"; OS.ScriptName picks Play.sh).
+      string sh = Path.Combine(dir, "Play.sh");
+      File.WriteAllText(sh, "#!/usr/bin/env bash\n# Starts this game (built by the launcher with tools/ps2port).\n" +
+          "here=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n" +
+          "exec \"${PYTHON:-python3}\" \"$here/../../../tools/ps2port/ps2port.py\" play --port \"$here\" \"$@\"\n");
+      Shortcuts.MakeExecutable(sh);
+    }
     return id;
   }
 
@@ -88,22 +96,26 @@ sealed class Recomp {
     setup.Remove("play_cmd");
     setup["game"] = title;
     setup["disc"] = "PlayStation 5 (" + titleId + ")";
-    var js = new JavaScriptSerializer();
-    File.WriteAllText(Path.Combine(dir, "setup.json"), js.Serialize(setup));
+        File.WriteAllText(Path.Combine(dir, "setup.json"), PortLauncher.Json.Write(setup));
     var installer = new Dictionary<string, object> {
       ["schema"] = 1, ["name"] = title, ["revision"] = titleId, ["filesystem"] = "folder", ["mode"] = "link", ["destination"] = "game_files",
       ["required_files"] = new Dictionary<string, object> { ["sce_sys/param.json"] = Sha256(param).ToLowerInvariant() },
       ["expected_files"] = new Dictionary<string, object> { ["sce_sys/param.json"] = param.LongLength },
       ["required_paths"] = new object[0],
     };
-    File.WriteAllText(Path.Combine(dir, "installer.json"), js.Serialize(installer));
+    File.WriteAllText(Path.Combine(dir, "installer.json"), PortLauncher.Json.Write(installer));
     string play = Str(Generic, "play_cmd");
-    if (play != null) File.WriteAllText(Path.Combine(dir, Str(Generic, "play", "Play.cmd")), play);
+    if (play != null) {
+      string file = Path.Combine(dir, OS.ScriptName(Str(Generic, "play", "Play.cmd")));
+      File.WriteAllText(file, play);
+      Shortcuts.MakeExecutable(file);
+    }
     return titleId;
   }
 
-  static IDictionary<string, object> Json(string path) =>
-      (IDictionary<string, object>)new JavaScriptSerializer().DeserializeObject(File.ReadAllText(path));
+  // A JSON file with this system's block ("linux": {...}) merged over its top level.
+  static IDictionary<string, object> ReadJson(string path) => OS.ForThisSystem(RawJson(path));
+  static IDictionary<string, object> RawJson(string path) => PortLauncher.Json.Object(File.ReadAllText(path));
   static string Str(IDictionary<string, object> d, string k, string def = null) =>
       d != null && d.TryGetValue(k, out var v) && v != null ? Convert.ToString(v) : def;
 
@@ -120,12 +132,14 @@ sealed class Recomp {
 
   public static Recomp Load(string root) {
     string json = Path.Combine(root, "launcher.json");
-    var d = Json(json);
+    var raw = RawJson(json);
+    var d = OS.ForThisSystem(raw);
     string games = Str(d, "games_dir");
     if (games == null) return null;
     var r = new Recomp {
       Root = root, Name = Str(d, "recomp", Path.GetFileName(root)), Repo = Str(d, "repo"), Branch = Str(d, "branch", "main"),
-      Setup = Path.Combine(root, Str(d, "setup", "tools/port-installer/setup/setup.ps1")),
+      Setup = Path.Combine(root, OS.ScriptName(Str(d, "setup", "tools/port-installer/setup/setup.ps1"))),
+      Supported = OS.Supports(raw),
       ToolsDir = Path.Combine(root, Str(d, "tools_dir", ".local/tools")), LauncherJson = File.ReadAllText(json),
     };
     r.Generic = d.TryGetValue("generic", out var gen) ? gen as IDictionary<string, object> : null;
@@ -139,9 +153,11 @@ sealed class Recomp {
         string setup = Path.Combine(dir, "setup.json"), installer = Path.Combine(dir, "installer.json");
         if (!File.Exists(setup) || !File.Exists(installer)) continue;
         try {
-          var s = Json(setup);
-          var g = new RecompGame { Id = Path.GetFileName(dir), Dir = dir, Name = Str(s, "game", Path.GetFileName(dir)), Disc = Str(s, "disc", "") };
-          var inst = Json(installer);
+          var rawSetup = RawJson(setup);
+          var s = OS.ForThisSystem(rawSetup);
+          var g = new RecompGame { Id = Path.GetFileName(dir), Dir = dir, Name = Str(s, "game", Path.GetFileName(dir)), Disc = Str(s, "disc", ""),
+                                   Supported = r.Supported && OS.Supports(rawSetup, false) };
+          var inst = ReadJson(installer);
           if (inst.TryGetValue("required_files", out var req) && req is IDictionary<string, object> files)
             foreach (var kv in files) { g.Executables.Add(Path.GetFileName(kv.Key)); g.Required[kv.Key] = Convert.ToString(kv.Value); }
           if (inst.TryGetValue("expected_files", out var exp) && exp is IDictionary<string, object> sizes)
@@ -157,10 +173,10 @@ sealed class Recomp {
     // A game with its own PC menu keys (games/<game>/launcher.json) uses that file instead of the shared one.
     string own = Path.Combine(game.Dir, "launcher.json");
     var c = GameConfig.Parse(File.Exists(own) ? File.ReadAllText(own) : LauncherJson);
-    var s = Json(Path.Combine(game.Dir, "setup.json"));
+    var s = ReadJson(Path.Combine(game.Dir, "setup.json"));
     c.Game = game.Name;
     c.Disc = game.Disc;
-    c.Play = Str(s, "play", c.Play);
+    c.Play = OS.ScriptName(Str(s, "play", c.Play));
     c.Minutes = Str(s, "minutes", c.Minutes);
     if (s.TryGetValue("disk_gb", out var gb) && gb != null) c.DiskGb = Convert.ToInt32(gb);
     if (s.TryGetValue("exe", out var exe) && exe != null) c.Exe = Convert.ToString(exe);
@@ -168,7 +184,7 @@ sealed class Recomp {
     c.Repo = Repo;
     c.ToolsRoot = Root;
     c.GameFiles.Clear();
-    var inst = Json(Path.Combine(game.Dir, "installer.json"));
+    var inst = ReadJson(Path.Combine(game.Dir, "installer.json"));
     string dest = Str(inst, "destination", "game_files");
     if (inst.TryGetValue("required_files", out var req) && req is IDictionary<string, object> files)
       foreach (var kv in files) c.GameFiles[dest + "/" + kv.Key] = Convert.ToString(kv.Value);
@@ -182,14 +198,28 @@ sealed class Recomp {
   public void EnsureInstallerFiles(Action<string> log = null) {
     if (File.Exists(Setup)) return;
     string target = Path.GetDirectoryName(Path.GetDirectoryName(Setup));   // .../tools/port-installer
+    // Linux / macOS with a port-installer from before setup.sh existed: the launcher's own copy is used from its
+    // cache instead (the recompiler's folder is left as it is).
+    if (!OS.Windows && Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any()) {
+      string own = Path.Combine(Prefs.Cache, "port-installer");
+      Extract(own);
+      Setup = Path.Combine(own, "setup", "setup.sh");
+      log?.Invoke("port-installer -> " + own);
+      return;
+    }
+    Extract(target);
+    log?.Invoke("port-installer -> " + target);
+  }
+
+  static void Extract(string target) {
     var asm = Assembly.GetExecutingAssembly();
     foreach (string name in asm.GetManifestResourceNames().Where(n => n.StartsWith("pi/"))) {
       string dest = Path.Combine(target, name.Substring(3).Replace('/', Path.DirectorySeparatorChar));
       Directory.CreateDirectory(Path.GetDirectoryName(dest));
       using (var src = asm.GetManifestResourceStream(name))
       using (var dst = File.Create(dest)) src.CopyTo(dst);
+      if (dest.EndsWith(".sh", StringComparison.OrdinalIgnoreCase)) Shortcuts.MakeExecutable(dest);
     }
-    log?.Invoke("port-installer -> " + target);
   }
 
   // The newest source of a recompiler (its branch as a ZIP from GitHub: code only, nothing from any game).
@@ -358,13 +388,15 @@ sealed class Recomp {
 // The recompilers this launcher can download when it runs on its own (recomps.json inside the exe).
 sealed class KnownRecomp {
   public string Id, Console, Name, Repo, Branch, Folder, Pt, En;
+  public string[] Platforms = { "windows" };   // recomps.json "platforms": the systems its games build and run on
+  public bool Supported => Platforms.Contains(OS.Key);
 
   public static List<KnownRecomp> List() {
     var list = new List<KnownRecomp>();
     using (var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("recomps.json")) {
       if (s == null) return list;
       using (var r = new StreamReader(s)) {
-        var items = new JavaScriptSerializer().DeserializeObject(r.ReadToEnd()) as object[];
+        var items = PortLauncher.Json.Parse(r.ReadToEnd()) as object[];
         foreach (var o in items ?? new object[0])
           if (o is IDictionary<string, object> d)
             list.Add(new KnownRecomp {
@@ -374,6 +406,7 @@ sealed class KnownRecomp {
               Branch = d.TryGetValue("branch", out var b) ? Convert.ToString(b) : "main",
               Folder = d.TryGetValue("folder", out var f) ? Convert.ToString(f) : Convert.ToString(d["name"]),
               Pt = d.TryGetValue("pt", out var pt) ? Convert.ToString(pt) : "", En = d.TryGetValue("en", out var en) ? Convert.ToString(en) : "",
+              Platforms = d.TryGetValue("platforms", out var pl) && pl is object[] arr ? arr.Select(x => Convert.ToString(x)).ToArray() : new[] { "windows" },
             });
       }
     }

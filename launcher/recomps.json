@@ -6,6 +6,7 @@
     "repo": "batatinhafcbatatinha-pixel/PS2Recomp",
     "branch": "main",
     "folder": "PS2Recomp",
+    "platforms": ["windows", "linux", "macos"],
     "pt": "Jogos de PlayStation 2 recompilados para PC (pasta games/ do repositório).",
     "en": "PlayStation 2 games recompiled for PC (the repository's games/ folder)."
   },

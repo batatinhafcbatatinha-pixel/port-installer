@@ -12,8 +12,6 @@ namespace PortLauncher {
 sealed partial class MainForm {
   // ------------------------------------------------------------------ PC settings page
 
-  static readonly HashSet<string> OffWords = new HashSet<string> { "Desligada", "Desligado", "Não", "Esconder", "Off", "No", "Hide" };
-
   void BuildSettingsPage() {
     var stack = Stack(Theme.Bg);
     settingsNote = Words("", Theme.UI(9.5f), Theme.Text3, new Padding(4, 0, 4, 14));
@@ -43,7 +41,7 @@ sealed partial class MainForm {
           slider.Range(s.Min, s.Max, s.Step);
           slider.ValueChanged += (o, e) => Changed();
           editor = slider;
-        } else if (s.Source == null && s.Choices.Count == 2 && s.Choices.Any(c => c.Value == 0 && OffWords.Contains(c.Pt)) && s.Choices.Any(c => c.Value == 1)) {
+        } else if (SettingsStore.IsToggle(s)) {
           var toggle = new ToggleSwitch { Width = 360, Anchor = AnchorStyles.Right };
           toggle.OnText = L.T(s.Choices.First(c => c.Value == 1));
           toggle.OffText = L.T(s.Choices.First(c => c.Value == 0));
@@ -144,8 +142,7 @@ sealed partial class MainForm {
     return s.Default;
   }
 
-  bool SettingVisible(Setting s) =>
-      s.Requires != "vulkan" || (root != null && cfg.VulkanDir != null && Directory.Exists(Path.Combine(root, cfg.VulkanDir)));
+  bool SettingVisible(Setting s) => SettingsStore.Visible(s, cfg, root);
 
   void LoadSettings() {
     string ini = IniPath;
@@ -169,49 +166,9 @@ sealed partial class MainForm {
   }
 
   // One value from wherever the game keeps it (see Setting.Store / Section / File / Div and Choice.Set).
-  int ReadSetting(Setting s, string ini, Dictionary<string, string> plain) {
-    string section = s.Section ?? cfg.Section;
-    Func<string, string> text = key => plain != null ? (plain.TryGetValue(key, out var v) ? v : "") : Ini.GetText(ini, section, key);
-    Func<string, int, int> number = (key, def) => int.TryParse(text(key), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) ? n : def;
-    switch (s.Store) {
-      case "gpu_pref":
-        return GameExe != null ? GpuPreference.Get(Path.GetFullPath(GameExe)) : s.Default;
-      case "word": {
-        string path = Path.Combine(root, s.File);
-        string word = File.Exists(path) ? File.ReadAllText(path).Trim().Split(new[] { ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() : null;
-        var hit = s.Choices.FirstOrDefault(c => c.Word == word);
-        return hit != null ? hit.Value : s.Default;
-      }
-    }
-    if (s.Choices.Count > 0 && s.Choices[0].Set.Count > 0) {
-      var hit = s.Choices.FirstOrDefault(c => c.Set.All(kv => number(kv.Key, int.MinValue) == kv.Value));
-      return hit != null ? hit.Value : s.Default;
-    }
-    if (s.Div > 0)
-      return double.TryParse(text(s.Key), NumberStyles.Float, CultureInfo.InvariantCulture, out double d) ? (int)Math.Round(d * s.Div) : s.Default;
-    return number(s.Key, s.Default);
-  }
+  int ReadSetting(Setting s, string ini, Dictionary<string, string> plain) => SettingsStore.Read(s, cfg, root, GameExe, ini, plain);
 
-  void WriteSetting(Setting s, int value, string ini, Dictionary<string, string> plain) {
-    string section = s.Section ?? cfg.Section;
-    Action<string, string> put = (key, v) => { if (plain != null) plain[key] = v; else Ini.PutText(ini, section, key, v); };
-    switch (s.Store) {
-      case "gpu_pref":
-        if (GameExe != null) GpuPreference.Set(Path.GetFullPath(GameExe), value);
-        return;
-      case "word": {
-        var hit = s.Choices.FirstOrDefault(c => c.Value == value);
-        if (hit?.Word != null) File.WriteAllText(Path.Combine(root, s.File), hit.Word + "\n");
-        return;
-      }
-    }
-    var choice = s.Choices.FirstOrDefault(c => c.Value == value);
-    if (choice != null && choice.Set.Count > 0) {
-      foreach (var kv in choice.Set) put(kv.Key, kv.Value.ToString(CultureInfo.InvariantCulture));
-      return;
-    }
-    put(s.Key, s.Div > 0 ? (value / (double)s.Div).ToString("0.00", CultureInfo.InvariantCulture) : value.ToString(CultureInfo.InvariantCulture));
-  }
+  void WriteSetting(Setting s, int value, string ini, Dictionary<string, string> plain) => SettingsStore.Write(s, value, cfg, root, GameExe, ini, plain);
 
   void SaveSettings() {
     string ini = IniPath;

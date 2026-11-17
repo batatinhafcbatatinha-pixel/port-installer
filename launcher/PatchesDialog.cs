@@ -25,41 +25,12 @@ sealed partial class MainForm {
     }
   }
 
-  PatchGame PatchGameOf(GameEntry e) {
-    var g = new PatchGame { Console = e.Console, Serial = e.Serial, Name = e.Name };
-    if (e.Console == "ps5") g.TitleId = e.Serial;
-    if (e.Console == "ps2" && e.Game != null) {
-      // PCSX2 names its files <serial>_<CRC of the boot executable>.
-      string boot = e.Game.Executables.FirstOrDefault(x => Covers.Serial(x) != null);
-      if (boot != null) {
-        try {
-          string installed = Path.Combine(e.Game.Dir, "game_files", boot);
-          byte[] elf = File.Exists(installed) ? File.ReadAllBytes(installed) : e.Disc != null ? Recomp.ReadDiscFile(e.Disc, boot) : null;
-          if (elf != null) g.Crc = PatchLibrary.Ps2Crc(elf);
-          g.Serial = g.Serial ?? Covers.Serial(boot);
-        } catch (Exception) { }
-      }
-    }
-    return g;
-  }
+  PatchGame PatchGameOf(GameEntry e) => PatchChoices.GameOf(e);
 
   // tools/ps2port hotpatch for the selected game, its output in the log.
   void RunHotpatch(GameEntry e) {
-    var r = e.Recomp;
-    string script = Path.Combine(r.Root, "tools", "ps2port", "ps2port.py");
-    if (!File.Exists(script)) { AppendLog("hotpatch: " + script + " missing"); return; }
-    string python = Path.Combine(r.Root, ".local", "python", "python.exe");
-    if (!File.Exists(python)) python = "python";
-    var psi = new ProcessStartInfo(python, $"\"{script}\" hotpatch --port \"{e.Game.Dir}\"") {
-      WorkingDirectory = r.Root, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-    };
-    // llvm-mingw from the recompiler's tools (the ZIP's compiler); with none, ps2port finds Visual Studio itself.
-    string mingw = Directory.Exists(r.ToolsDir) ? Directory.GetDirectories(r.ToolsDir, "llvm-mingw-*").FirstOrDefault() : null;
-    if (mingw != null) {
-      psi.EnvironmentVariables["PATH"] = Path.Combine(mingw, "bin") + ";" + psi.EnvironmentVariables["PATH"];
-      psi.EnvironmentVariables["CC"] = "clang";
-      psi.EnvironmentVariables["CXX"] = "clang++";
-    }
+    var psi = PatchChoices.Hotpatch(e);
+    if (psi == null) { AppendLog("hotpatch: " + Path.Combine(e.Recomp.Root, "tools", "ps2port", "ps2port.py") + " missing"); return; }
     SetLogVisible(true);
     stepLabel.Text = L.T("Aplicando patches e cheats (só as funções alteradas são recompiladas)...", "Applying patches and cheats (only the changed functions are recompiled)...");
     var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
@@ -89,14 +60,13 @@ sealed class PatchesDialog : Form {
   readonly Label note = new Label { AutoSize = true, MaximumSize = new Size(820, 0) };
   readonly Label detail = new Label { AutoSize = true, MaximumSize = new Size(820, 0) };
   readonly Label status = new Label { AutoSize = true, MaximumSize = new Size(520, 0), Anchor = AnchorStyles.Left };
-  readonly Dictionary<string, HashSet<string>> chosen = new Dictionary<string, HashSet<string>>();   // source key -> titles
+  Dictionary<string, HashSet<string>> chosen = new Dictionary<string, HashSet<string>>();   // source key -> titles
   List<PatchEntry> entries = new List<PatchEntry>();
   bool filling;
   int loadPass;
   public bool Applied;
 
   string What => kind == PatchKind.Patch ? L.T("Patches", "Patches") : L.T("Cheats", "Cheats");
-  string ChoiceFile => Path.Combine(Prefs.Dir, "choices", Regex.Replace(game.Console + "-" + (game.Serial ?? game.Name ?? "game"), @"[^\w.-]", "_") + "-" + kind + ".txt");
 
   public PatchesDialog(PatchKind kind, PatchGame game, string gameDir, string recompName) {
     this.kind = kind; this.game = game; this.gameDir = gameDir; this.recompName = recompName;
@@ -236,55 +206,12 @@ sealed class PatchesDialog : Form {
 
   // ------------------------------------------------------------------ choices and the files the recompiler reads
 
-  void LoadChoices() {
-    try {
-      if (!File.Exists(ChoiceFile)) return;
-      foreach (string line in File.ReadAllLines(ChoiceFile)) {
-        var p = line.Split('\t');
-        if (p.Length != 2) continue;
-        if (!chosen.TryGetValue(p[0], out var set)) chosen[p[0]] = set = new HashSet<string>();
-        set.Add(p[1]);
-      }
-    } catch (Exception) { }
-  }
+  void LoadChoices() => chosen = PatchChoices.Load(game, kind);
 
   void Apply() {
     RememberChecks();
-    Directory.CreateDirectory(Path.GetDirectoryName(ChoiceFile));
-    File.WriteAllLines(ChoiceFile, chosen.SelectMany(kv => kv.Value.Select(t => kv.Key + "\t" + t)));
-    // The chosen entries of every source, with their code lines (the current source's are loaded; others reload).
-    var sb = new StringBuilder();
-    sb.AppendLine("// " + What + L.T(" escolhidos no launcher para ", " chosen in the launcher for ") + game.Name + " (" + game.Serial + (game.Crc != null ? " " + game.Crc : "") + "). " +
-                  L.T("O launcher reescreve este arquivo.", "The launcher rewrites this file."));
-    int count = 0;
-    var json = new List<KeyValuePair<string, string>>();   // PS5: file name -> the patch's JSON text
-    foreach (var src in sources) {
-      if (!chosen.TryGetValue(src.Key, out var on) || on.Count == 0) continue;
-      List<PatchEntry> all;
-      try { all = src == Source ? entries : PatchLibrary.Load(src, game, out _); } catch (Exception) { continue; }
-      foreach (var e in all.Where(x => on.Contains(x.Title))) {
-        sb.AppendLine();
-        sb.AppendLine("[" + e.Title + "]");
-        sb.AppendLine("// " + src.Repo + "/" + e.File);
-        foreach (string l in e.Lines) sb.AppendLine(l);
-        ++count;
-        if (game.Console == "ps5" && e.Supported && e.File.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-          json.Add(new KeyValuePair<string, string>(Regex.Replace(src.Repo, @"[^\w.-]", "_") + "-" + Path.GetFileName(e.File), string.Join("\n", e.Lines)));
-      }
-    }
-    string file = Path.Combine(gameDir, game.Console == "ps2" ? (kind == PatchKind.Patch ? "patches.pnach" : "cheats.pnach")
-                                                             : (kind == PatchKind.Patch ? "patches-chosen.txt" : "cheats-chosen.txt"));
-    try {
-      if (count == 0) { if (File.Exists(file)) File.Delete(file); }
-      else File.WriteAllText(file, sb.ToString(), new UTF8Encoding(false));
-      if (game.Console == "ps5" && kind == PatchKind.Patch) {
-        // <game>/patches holds exactly the chosen patches: tools/ps5port applies them at play and undoes the rest.
-        string dir = Path.Combine(gameDir, "patches");
-        if (Directory.Exists(dir)) foreach (string old in Directory.GetFiles(dir, "*.json")) File.Delete(old);
-        if (json.Count > 0) Directory.CreateDirectory(dir);
-        foreach (var kv in json) File.WriteAllText(Path.Combine(dir, kv.Key), kv.Value, new UTF8Encoding(false));
-      }
-    } catch (Exception ex) { Dialog.Info(this, Text, ex.Message); return; }
+    try { PatchChoices.Apply(game, kind, gameDir, sources, chosen, Source, entries, What); }
+    catch (Exception ex) { Dialog.Info(this, Text, ex.Message); return; }
     Applied = true;
     Close();
   }

@@ -33,7 +33,7 @@ static class KitDownload {
     log(L.T("Extraindo para ", "Extracting to ") + target);
     Unzip(zip, target);
     File.Delete(zip);
-    string self = Assembly.GetExecutingAssembly().Location;
+    string self = OS.ExePath;
     string copy = Path.Combine(target, Path.GetFileName(self));
     if (!string.Equals(Path.GetFullPath(self), copy, StringComparison.OrdinalIgnoreCase)) File.Copy(self, copy, true);
     log("OK");
@@ -65,7 +65,7 @@ static class KitDownload {
       web.Headers[HttpRequestHeader.UserAgent] = "port-launcher";
       web.Headers[HttpRequestHeader.Accept] = "application/vnd.github+json";
       string json = web.DownloadString($"https://api.github.com/repos/{repo}/releases?per_page=1");
-      var list = new System.Web.Script.Serialization.JavaScriptSerializer().DeserializeObject(json) as object[];
+      var list = Json.Parse(json) as object[];
       if (list == null || list.Length == 0 || !(list[0] is System.Collections.Generic.IDictionary<string, object> release))
         throw new IOException("No release found for " + repo);
       return Convert.ToString(release["tag_name"]);

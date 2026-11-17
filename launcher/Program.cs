@@ -77,6 +77,7 @@ static class Program {
       empty.Game = "Port launcher";
       var form = new MainForm(empty, null, 0, registry, key);
       if (shotFile != null) form.ShotOnLoad(shotFile, shotTab);
+      if (args.Contains("--left")) { form.StartPosition = FormStartPosition.Manual; form.Location = new Point(0, 0); }   // test aid: open at the left edge
       Application.Run(form);
       if (!form.Restart) break;
       key = form.NextGame;
@@ -84,11 +85,13 @@ static class Program {
   }
 
   static void RunKit(GameConfig config, string dir, string shotFile, int shotTab) {
+    var args = Environment.GetCommandLineArgs();
     string kit = MainForm.IsKit(dir) ? dir : null;
     int page = 0;
     while (true) {
       var form = new MainForm(config, kit, page);
       if (shotFile != null) form.ShotOnLoad(shotFile, shotTab);
+      if (args.Contains("--left")) { form.StartPosition = FormStartPosition.Manual; form.Location = new Point(0, 0); }   // test aid: open at the left edge
       Application.Run(form);
       if (!form.Restart) break;
       kit = form.RootForRestart;   // a kit downloaded in this session stays

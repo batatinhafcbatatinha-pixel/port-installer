@@ -68,7 +68,7 @@ sealed class RecompRegistry {
     string repo = r.Repo ?? "";
     return Known.FirstOrDefault(k => string.Equals(k.Repo, repo, StringComparison.OrdinalIgnoreCase))
         ?? Known.FirstOrDefault(k => repo.EndsWith("/" + k.Folder, StringComparison.OrdinalIgnoreCase))
-        ?? Known.FirstOrDefault(k => string.Equals(Path.GetFileName(r.Root.TrimEnd('\\')), k.Folder, StringComparison.OrdinalIgnoreCase));
+        ?? Known.FirstOrDefault(k => string.Equals(Path.GetFileName(r.Root.TrimEnd(Path.DirectorySeparatorChar)), k.Folder, StringComparison.OrdinalIgnoreCase));
   }
 
   public static RecompRegistry Load(string home) {
@@ -102,7 +102,7 @@ sealed class RecompRegistry {
   public void Remember(string id, string root) {
     try {
       var rows = Saved().Where(kv => kv.Key != id).ToList();
-      rows.Add(new KeyValuePair<string, string>(id, Path.GetFullPath(root).TrimEnd('\\')));
+      rows.Add(new KeyValuePair<string, string>(id, Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar)));
       Directory.CreateDirectory(Prefs.Dir);
       File.WriteAllLines(FileName, rows.Select(kv => kv.Key + "\t" + kv.Value).ToArray());
     } catch (Exception) { }
@@ -140,6 +140,9 @@ sealed class FoundDisc {
 static class DiscScanner {
   static readonly HashSet<string> SkipDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
     "Windows", "$Recycle.Bin", "System Volume Information", "node_modules", ".git", ".local", "game_files", "AppData",
+  };
+  static readonly HashSet<string> UnixSkip = new HashSet<string> {
+    "/proc", "/sys", "/dev", "/run", "/tmp", "/var", "/usr", "/etc", "/boot", "/snap", "/System", "/Library", "/private",
   };
 
   // Every disc image (.iso) or extracted disc folder under the folders, with its console and game.
@@ -205,6 +208,7 @@ static class DiscScanner {
         try {
           var info = new DirectoryInfo(d);
           if (SkipDirs.Contains(info.Name) || info.Name.StartsWith("$")) continue;
+          if (!OS.Windows && (UnixSkip.Contains(d) || info.Name.StartsWith("."))) continue;   // system and hidden folders
           if ((info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.System)) != 0) continue;
         } catch (Exception) { continue; }
         pending.Push(new KeyValuePair<string, int>(d, item.Value + 1));

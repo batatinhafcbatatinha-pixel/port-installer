@@ -631,42 +631,9 @@ sealed partial class MainForm : Form {
     FitCover();
   }
 
-  string PrimaryText(GameEntry e) {
-    if (e.NeedsRecomp) return e.Known != null ? L.T("BAIXAR ", "GET ") + e.Known.Folder.ToUpperInvariant() : L.T("SEM RECOMPILADOR", "NO RECOMPILER");
-    if (e.Unsupported) return L.T("AINDA SEM SUPORTE", "NOT SUPPORTED YET");
-    if (e.NoProfile) return L.T("MONTAR (GENÉRICO)", "BUILD (GENERIC)");
-    switch (e.State) {
-      case EntryState.Ready: return L.T("JOGAR", "PLAY");
-      case EntryState.HasDisc: return L.T("INSTALAR E MONTAR", "INSTALL AND BUILD");
-      case EntryState.Kit: return L.T("INSTALAR", "INSTALL");
-      default: return Lib ? L.T("ESCOLHER O DISCO...", "CHOOSE THE DISC...") : L.T("INSTALAR", "INSTALL");
-    }
-  }
+  string PrimaryText(GameEntry e) => Texts.Primary(e, Lib);
 
-  string DetailNote(GameEntry e) {
-    if (e.NeedsRecomp)
-      return e.Known != null
-          ? L.T($"Jogos de {Consoles.Name(e.Console)} usam o {e.Known.Name}, que ainda não está neste PC. O launcher baixa o código dele do GitHub (nada de nenhum jogo) e depois monta o jogo a partir do seu disco.",
-                $"{Consoles.Name(e.Console)} games use {e.Known.Name}, which is not on this PC yet. The launcher downloads its source from GitHub (nothing from any game), then builds the game from your disc.")
-          : L.T("Ainda não há recompilador para este console.", "There is no recompiler for this console yet.");
-    if (e.Unsupported)
-      return L.T($"O {e.Recomp?.Name} ainda não tem este jogo. Atualizações do recompilador podem trazer suporte (menu Atualizações).",
-                 $"{e.Recomp?.Name} does not have this game yet. Recompiler updates may add it (Updates menu).");
-    if (e.NoProfile)
-      return L.T("Este disco não tem perfil neste recompilador. O caminho genérico tenta montar qualquer jogo; pode não funcionar ou parar em algum ponto.",
-                 "This disc has no profile in this recompiler. The generic path tries to build any game; it may not work or may stop somewhere.");
-    switch (e.State) {
-      case EntryState.Ready: return cfg.PcMenu
-          ? L.T("No jogo, F1 (ou Back+Start no controle) abre as mesmas configurações do PC.", "In the game, F1 (or Back+Start on a controller) opens the same PC settings.")
-          : L.T("As configurações de PC ficam em Configurar. No jogo: F10 desempenho, F11 tela cheia, F12 captura de tela.", "The PC settings are under Configure. In the game: F10 performance, F11 fullscreen, F12 screenshot.");
-      case EntryState.HasDisc: return L.T("O disco foi encontrado nas suas pastas. A montagem instala o que faltar, copia e confere os arquivos e compila o jogo; as etapas prontas são puladas depois.",
-                                          "The disc was found in your folders. The build installs what is missing, copies and checks the files and compiles the game; finished steps are skipped later.");
-      case EntryState.Kit: return L.T($"O instalador baixa o kit do port (código-fonte), instala as ferramentas, pede o seu disco ({cfg.Disc}) e monta a versão para PC.",
-                                      $"The installer downloads the port kit (source code), installs the tools, asks for your disc ({cfg.Disc}) and builds the PC version.");
-      default: return L.T($"Nenhum disco deste jogo nas suas pastas{(GameFolders.Load().Count == 0 ? " (nenhuma pasta adicionada)" : "")}. Escolha a ISO ou adicione a pasta onde ela está.",
-                          $"No disc of this game in your folders{(GameFolders.Load().Count == 0 ? " (no folder added)" : "")}. Choose the ISO or add the folder that holds it.");
-    }
-  }
+  string DetailNote(GameEntry e) => Texts.DetailNote(e, cfg);
 
   // ------------------------------------------------------------------ log drawer and status bar
 
@@ -737,32 +704,7 @@ sealed partial class MainForm : Form {
     if (!Lib) {
       entries.Add(new GameEntry { Key = "kit", Name = cfg.Game, Serial = cfg.Disc, Dir = root, Installed = Installed, Platform = L.T("Port para PC", "PC port") });
     } else {
-      var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-      foreach (var kv in registry.Installed) {
-        var rc = kv.Value;
-        string console = registry.Known.FirstOrDefault(k => k.Id == kv.Key)?.Console;
-        foreach (var g in rc.Games) {
-          var disc = found.FirstOrDefault(f => f.Game == g);
-          bool installed = false;
-          try { var c = g == game ? cfg : rc.ConfigFor(g); installed = c.Exe != null && File.Exists(Path.Combine(g.Dir, c.Exe)); } catch (Exception) { }
-          if (disc == null && !installed) continue;
-          string key = kv.Key + "/" + g.Id;
-          seen.Add(key);
-          string serial = Covers.Serial(disc?.Label) ?? g.Executables.Select(Covers.Serial).FirstOrDefault(x => x != null);
-          entries.Add(new GameEntry { Key = key, Game = g, Recomp = rc, Known = registry.KnownFor(rc), Console = console, Name = g.Name,
-                                      Serial = serial ?? Short(g.Disc), Disc = disc?.Path, Dir = g.Dir, Installed = installed, Platform = Consoles.Short(console) });
-        }
-      }
-      foreach (var f in found.Where(f => f.Game == null)) {
-        string key = "disc:" + f.Console + ":" + (f.Label ?? f.Path);
-        if (!seen.Add(key)) continue;
-        string name = f.IsFolder ? new DirectoryInfo(f.Path).Name : Path.GetFileNameWithoutExtension(f.Path);
-        var known = registry.ForConsole(f.Console);
-        bool generic = f.Recomp != null && f.Recomp.Generic != null && f.Label != null && Regex.IsMatch(f.Label, f.Recomp.LabelRegex, RegexOptions.IgnoreCase);
-        entries.Add(new GameEntry { Key = key, Name = name, Serial = Covers.Serial(f.Label) ?? f.Label, Disc = f.Path, Console = f.Console,
-                                    Recomp = f.Recomp, Known = known, NeedsRecomp = f.Recomp == null, NoProfile = generic,
-                                    Unsupported = f.Recomp != null && !generic, Platform = Consoles.Short(f.Console) });
-      }
+      entries = Entries.Library(registry, found, game, cfg);
     }
     foreach (var e in entries)
       if (old.TryGetValue(e.Key + "|" + e.Disc, out var prev)) { e.Cover = prev.Cover; e.CoverDone = prev.CoverDone; }
@@ -784,12 +726,6 @@ sealed partial class MainForm : Form {
     UpdateEmpty();
   }
 
-  static string Short(string disc) {
-    if (string.IsNullOrEmpty(disc)) return null;
-    var m = Regex.Match(disc, @"\(([^)]+)\)");
-    return m.Success ? m.Groups[1].Value : null;
-  }
-
   void LoadCovers() {
     int pass = ++coverPass;
     var todo = library.Entries.Where(x => !x.CoverDone).ToList();
@@ -800,7 +736,7 @@ sealed partial class MainForm : Form {
         if (pass != coverPass) return;
         Bitmap b = null;
         string url = e.Recomp?.CoverUrl ?? (e.Console == "ps2" ? Covers.DefaultPs2Url : null);
-        try { b = Covers.Find(e.Key, e.Serial, e.Dir, e.Disc, url, online); } catch (Exception) { }
+        try { b = Covers.Find(e.Key, e.Serial, e.Dir, e.Disc, url, online, CoverThumb.Load); } catch (Exception) { }
         try {
           BeginInvoke(new Action(() => {
             e.Cover = b; e.CoverDone = true;
@@ -1145,7 +1081,7 @@ sealed partial class MainForm : Form {
     if (line == null) return;
     if (InvokeRequired) { try { BeginInvoke(new Action<string>(AppendLog), line); } catch (Exception) { } return; }
     log.AppendText(line + Environment.NewLine);
-    var m = Regex.Match(line, @"^== (\d)/(\d) (.*)$");
+    var m = Runner.StepLine.Match(line);
     if (m.Success) {
       progress.Maximum = int.Parse(m.Groups[2].Value);
       progress.Value = int.Parse(m.Groups[1].Value) - 1;
@@ -1153,11 +1089,7 @@ sealed partial class MainForm : Form {
     }
   }
 
-  string DefaultInstallFolder() {
-    var best = DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
-        .OrderByDescending(d => d.AvailableFreeSpace).FirstOrDefault();
-    return Path.Combine(best?.RootDirectory.FullName ?? "C:\\", "Games", RepoName);
-  }
+  string DefaultInstallFolder() => Path.Combine(Texts.DefaultGamesFolder(), RepoName);
 
   async void Install(string source = null) {
     if (Busy) return;
@@ -1172,21 +1104,7 @@ sealed partial class MainForm : Form {
         target = Path.Combine(d.SelectedPath, RepoName);
       }
     }
-    string msg = L.T(
-        "O instalador vai:\n\n" +
-        (root == null ? "•  baixar o kit do port do GitHub (só código-fonte, cerca de 1 MB)\n" : "") +
-        (cfg.BuildToolsGb > 0 ? "•  instalar o Python e o Microsoft C++ Build Tools se faltarem (o Build Tools tem cerca de 7 GB e pede permissão de administrador)\n" : "") +
-        "•  baixar as ferramentas de compilação que ainda não estiverem na pasta\n" +
-        (source != null ? $"•  copiar os arquivos do jogo de {source}\n" : $"•  pedir o seu disco ({cfg.Disc}) ou a imagem .iso\n") +
-        $"•  montar a versão para PC (cerca de {cfg.Minutes} minutos)\n\n" +
-        $"Pasta: {target}",
-        "The installer will:\n\n" +
-        (root == null ? "•  download the port kit from GitHub (source code only, about 1 MB)\n" : "") +
-        (cfg.BuildToolsGb > 0 ? "•  install Python and the Microsoft C++ Build Tools if missing (the Build Tools are about 7 GB and ask for administrator permission)\n" : "") +
-        "•  download the build tools not in the folder yet\n" +
-        (source != null ? $"•  copy the game files from {source}\n" : $"•  ask for your disc ({cfg.Disc}) or its .iso image\n") +
-        $"•  build the PC version (about {cfg.Minutes} minutes)\n\n" +
-        $"Folder: {target}");
+    string msg = Texts.InstallPlan(cfg, root == null, source, target);
     if (!Dialog.Ask(this, cfg.Game, msg, L.T("Instalar", "Install"), L.T("Cancelar", "Cancel"))) return;
 
     ShowLog();
@@ -1211,14 +1129,10 @@ sealed partial class MainForm : Form {
   static readonly Encoding Oem = Encoding.GetEncoding(System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
 
   void RunSetup(string only = null) {
-    var psi = new ProcessStartInfo {
-      FileName = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"),
-      Arguments = SetupArguments(only),
-      WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
-      RedirectStandardOutput = true, RedirectStandardError = true,
-      StandardOutputEncoding = Oem, StandardErrorEncoding = Oem,
-    };
-    psi.EnvironmentVariables["PORT_LAUNCHER"] = "1";
+    var psi = Runner.Setup(Lib ? recomp : null, cfg, root, only, pendingSource, AppendLog);
+    pendingSource = null;
+    psi.StandardOutputEncoding = Oem;
+    psi.StandardErrorEncoding = Oem;
     // PowerShell writes the console's OEM code page into the pipe; Python is told to do the same.
     psi.EnvironmentVariables["PYTHONIOENCODING"] = "cp" + Oem.CodePage + ":replace";
     var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
@@ -1231,20 +1145,6 @@ sealed partial class MainForm : Form {
     p.BeginOutputReadLine();
     p.BeginErrorReadLine();
     RefreshStatus();
-  }
-
-  string SetupArguments(string only) {
-    string args;
-    if (Lib && recomp != null) {
-      recomp.EnsureInstallerFiles(AppendLog);
-      args = $"-NoProfile -ExecutionPolicy Bypass -File \"{recomp.Setup}\" -Yes -NoShortcut -GameDir \"{root}\" -ToolsDir \"{recomp.ToolsDir}\"";
-    } else {
-      args = $"-NoProfile -ExecutionPolicy Bypass -File \"{Path.Combine(root, cfg.Setup)}\" -Yes -NoShortcut";
-    }
-    if (only != null) args += " -Only " + only;
-    if (pendingSource != null && (only == null || only == "game")) args += $" -Source \"{pendingSource}\"";
-    pendingSource = null;
-    return args;
   }
 
   void SetupFinished(int code, string only) {
@@ -1314,12 +1214,7 @@ sealed partial class MainForm : Form {
   void Play() {
     if (!Installed || Busy || !IsCurrent(Current)) return;
     var output = new StringBuilder();
-    var psi = new ProcessStartInfo {
-      FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
-      Arguments = $"/c \"\"{Path.Combine(root, cfg.Play)}\" < nul\"",
-      WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
-      RedirectStandardOutput = true, RedirectStandardError = true,
-    };
+    var psi = Runner.Play(cfg, root);
     var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
     p.OutputDataReceived += (s, e) => { if (e.Data != null) lock (output) output.AppendLine(e.Data); };
     p.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (output) output.AppendLine(e.Data); };
