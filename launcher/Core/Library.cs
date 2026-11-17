@@ -3,8 +3,6 @@
 // downloaded from a cover site such as PCSX2 uses; else the list draws a tile from the name).
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -14,12 +12,13 @@ using System.Threading;
 
 namespace PortLauncher {
 
-// Launcher preferences (%APPDATA%\port-launcher\launcher.ini) and its caches (%LOCALAPPDATA%\port-launcher).
+// Launcher preferences (%APPDATA%\port-launcher\launcher.ini) and its caches (%LOCALAPPDATA%\port-launcher);
+// Linux: ~/.config/port-launcher and ~/.cache/port-launcher; macOS: ~/Library/Application Support and ~/Library/Caches.
 static class Prefs {
   // PORT_LAUNCHER_HOME (test aid) keeps preferences and caches in another folder.
   static string Home => Environment.GetEnvironmentVariable("PORT_LAUNCHER_HOME");
-  public static string Dir => Home ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "port-launcher");
-  public static string Cache => Home != null ? Path.Combine(Home, "cache") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "port-launcher");
+  public static string Dir => Home ?? Path.Combine(OS.ConfigRoot, "port-launcher");
+  public static string Cache => Home != null ? Path.Combine(Home, "cache") : Path.Combine(OS.CacheRoot, "port-launcher");
   static string File => Path.Combine(Dir, "launcher.ini");
   public static int Int(string key, int def) { try { return Ini.Get(File, "launcher", key, def); } catch (Exception) { return def; } }
   public static bool Bool(string key, bool def) => Int(key, def ? 1 : 0) != 0;
@@ -51,9 +50,12 @@ static class GameFolders {
     var list = Load();
     int added = 0;
     foreach (string f in folders) {
-      string full = Path.GetFullPath(f).TrimEnd('\\');
+      char sep = Path.DirectorySeparatorChar;
+      string full = Path.GetFullPath(f).TrimEnd(sep);
       if (full.Length == 2 && full[1] == ':') full += "\\";
-      if (list.Any(x => string.Equals(x.TrimEnd('\\'), full.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))) continue;
+      if (full.Length == 0) full = "/";
+      var cmp = OS.Windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+      if (list.Any(x => string.Equals(x.TrimEnd(sep), full.TrimEnd(sep), cmp))) continue;
       list.Add(full);
       ++added;
     }
@@ -62,7 +64,7 @@ static class GameFolders {
   }
 }
 
-// Cover pictures, as small bitmaps ready to draw.
+// Cover pictures: which file to show for each game (each window makes its own small bitmap of it).
 static class Covers {
   public const string DefaultPs2Url = "https://raw.githubusercontent.com/xlenore/ps2-covers/main/covers/default/{serial}.jpg";
   static string CacheDir => Path.Combine(Prefs.Cache, "covers");
@@ -94,8 +96,10 @@ static class Covers {
     foreach (string ext in Exts) { try { File.Delete(Path.Combine(CustomDir, SafeName(key) + ext)); } catch (Exception) { } }
   }
 
-  // The best picture for a game (slow: reads the disc or the network; call it off the UI thread).
-  public static Bitmap Find(string key, string serial, string gameDir, string disc, string urlTemplate, bool online) {
+  // The best picture for a game (slow: reads the disc or the network; call it off the UI thread). thumb turns a file into
+  // the window's bitmap (null when it is not a readable picture: the next candidate is tried).
+  public static T Find<T>(string key, string serial, string gameDir, string disc, string urlTemplate, bool online, Func<string, T> thumb) where T : class {
+    var Thumb = thumb;
     var files = new List<string> { CustomFile(key) };
     if (gameDir != null) foreach (string ext in Exts) files.Add(Path.Combine(gameDir, "cover" + ext));
     if (serial != null) foreach (string ext in Exts) files.Add(Path.Combine(CacheDir, SafeName(serial) + ext));
@@ -138,24 +142,6 @@ static class Covers {
       } catch (Exception) { }
     }
     return null;
-  }
-
-  // A copy at most 360 px tall (the largest grid size), without keeping the file open.
-  static Bitmap Thumb(string file) {
-    try {
-      using (var s = new MemoryStream(File.ReadAllBytes(file)))
-      using (var img = Image.FromStream(s)) {
-        float k = Math.Min(1f, Math.Min(360f / img.Height, 360f / img.Width));
-        int w = Math.Max(1, (int)(img.Width * k)), h = Math.Max(1, (int)(img.Height * k));
-        var b = new Bitmap(w, h);
-        using (var g = Graphics.FromImage(b)) {
-          g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-          g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-          g.DrawImage(img, 0, 0, w, h);
-        }
-        return b;
-      }
-    } catch (Exception) { return null; }
   }
 }
 

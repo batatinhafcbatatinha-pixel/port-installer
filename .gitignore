@@ -5,3 +5,7 @@ dist/
 *.spec
 launcher/bin/
 launcher/obj/
+launcher-avalonia/bin/
+launcher-avalonia/obj/
+launcher-tests/bin/
+launcher-tests/obj/

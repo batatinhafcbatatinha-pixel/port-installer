@@ -322,34 +322,9 @@ sealed class InfoBar : Panel {
 
 // ---------------------------------------------------------------------- the library
 
-enum EntryState { Ready, HasDisc, NoDisc, NoProfile, Kit, NeedsRecomp, Unsupported }
-
-sealed class GameEntry {
-  public string Key, Name, Serial, Disc, Dir, Platform, Console;
-  public RecompGame Game;          // null: a disc without a profile, or the single game of a kit
-  public Recomp Recomp;            // the installed recompiler of the game's console
-  public KnownRecomp Known;        // the recompiler of the game's console (installed or not)
-  public bool Installed;
-  public bool NoProfile;           // the recompiler has no profile but can try its generic path
-  public bool NeedsRecomp;         // the console's recompiler is not on this PC yet
-  public bool Unsupported;         // the recompiler has neither a profile nor a generic path for it
+// The library entry (Core/Flow.cs) with what this window draws: the cover bitmap and the state colour.
+sealed partial class GameEntry {
   public Bitmap Cover;
-  public bool CoverDone;
-
-  public EntryState State => NeedsRecomp ? EntryState.NeedsRecomp : Unsupported ? EntryState.Unsupported : NoProfile ? EntryState.NoProfile : Installed ? EntryState.Ready : Disc != null ? EntryState.HasDisc : Dir == null ? EntryState.Kit : EntryState.NoDisc;
-  public string StateText {
-    get {
-      switch (State) {
-        case EntryState.Ready: return L.T("Pronto para jogar", "Ready to play");
-        case EntryState.HasDisc: return L.T("Disco encontrado", "Disc found");
-        case EntryState.NoProfile: return L.T("Experimental", "Experimental");
-        case EntryState.NeedsRecomp: return L.T("Baixar recompilador", "Get recompiler");
-        case EntryState.Unsupported: return L.T("Ainda sem suporte", "Not supported yet");
-        case EntryState.Kit: return L.T("Não instalado", "Not installed");
-        default: return L.T("Sem disco", "No disc");
-      }
-    }
-  }
   public Color StateColor {
     get {
       switch (State) {
@@ -826,6 +801,30 @@ static class FolderPicker {
       using (var d = new FolderBrowserDialog { Description = title }) if (d.ShowDialog(owner) == DialogResult.OK) list.Add(d.SelectedPath);
       return list;
     }
+  }
+}
+
+}
+
+namespace PortLauncher {
+
+// A cover file as a bitmap at most 360 px tall (the largest grid size), without keeping the file open.
+static class CoverThumb {
+  public static Bitmap Load(string file) {
+    try {
+      using (var s = new System.IO.MemoryStream(System.IO.File.ReadAllBytes(file)))
+      using (var img = Image.FromStream(s)) {
+        float k = Math.Min(1f, Math.Min(360f / img.Height, 360f / img.Width));
+        int w = Math.Max(1, (int)(img.Width * k)), h = Math.Max(1, (int)(img.Height * k));
+        var b = new Bitmap(w, h);
+        using (var g = Graphics.FromImage(b)) {
+          g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+          g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+          g.DrawImage(img, 0, 0, w, h);
+        }
+        return b;
+      }
+    } catch (Exception) { return null; }
   }
 }
 

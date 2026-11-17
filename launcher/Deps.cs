@@ -13,14 +13,6 @@ using System.Windows.Forms;
 namespace PortLauncher {
 
 sealed partial class MainForm {
-  sealed class Dep {
-    public string Name, Detail, Only;   // Only: the setup.ps1 -Only part that installs it (null: full setup)
-    public double Gb;
-    public bool OnSystemDrive;          // installs on C: whatever the game folder is
-    public bool? Ok;                    // null while checking
-    public string Found;                // where it was found / why it is missing
-  }
-
   TableLayoutPanel depsList;
   Label depsSummary;
   FlatButton depsAllButton, depsRecheckButton;
@@ -50,25 +42,7 @@ sealed partial class MainForm {
     pageDeps.Controls.Add(bottom);
   }
 
-  List<Dep> DepList() {
-    var list = new List<Dep> {
-      new Dep { Name = "Python 3.11+", Detail = L.T("roda os scripts de montagem e o instalador dos arquivos do jogo", "runs the build scripts and the game file installer"),
-                Only = "python", Gb = cfg.PythonGb, OnSystemDrive = true },
-    };
-    // A recompiler that compiles nothing (AnyPS5: deps "buildtools_gb": 0) does not need the C++ Build Tools.
-    if (cfg.BuildToolsGb > 0)
-      list.Add(new Dep { Name = "Microsoft C++ Build Tools", Detail = L.T("bibliotecas C++ e o Windows SDK (pede administrador)", "C++ libraries and the Windows SDK (asks for administrator)"),
-                         Only = "buildtools", Gb = cfg.BuildToolsGb, OnSystemDrive = true });
-    foreach (var t in cfg.Tools)
-      list.Add(new Dep { Name = t.Name, Only = "tools", Gb = t.Gb, Detail = cfg.ToolsRoot != null
-          ? L.T("fica dentro do recompilador (.local\\tools), usado por todos os jogos", "kept inside the recompiler (.local\\tools), shared by every game")
-          : L.T("fica dentro da pasta do jogo (.local\\tools)", "kept inside the game folder (.local\\tools)") });
-    list.Add(new Dep { Name = L.T("Seus arquivos do jogo", "Your game files"), Detail = cfg.Disc + L.T(" (do seu disco ou .iso)", " (from your disc or .iso)"),
-                       Only = "game", Gb = 0 });
-    list.Add(new Dep { Name = L.T("Versão para PC (montada)", "PC version (built)"), Detail = L.T($"tradução e compilação, cerca de {cfg.Minutes} min", $"translation and compile, about {cfg.Minutes} min"),
-                       Only = null, Gb = cfg.DiskGb });
-    return list;
-  }
+  List<Dep> DepList() => DepsCheck.List(cfg);
 
   async void CheckDeps() {
     if (depsChecking) return;
@@ -76,21 +50,9 @@ sealed partial class MainForm {
     deps = DepList();
     RenderDeps();
     string kit = root;
-    var results = await Task.Run(() => {
-      var r = new List<KeyValuePair<bool, string>>();
-      r.Add(FindPython(cfg.ToolsRoot));
-      if (cfg.BuildToolsGb > 0) r.Add(FindBuildTools());
-      string systemLlvm = SystemLlvm();
-      foreach (var t in cfg.Tools) {
-        if (t.Id == "llvm" && systemLlvm != null) { r.Add(new KeyValuePair<bool, string>(true, systemLlvm)); continue; }
-        string toolsRoot = cfg.ToolsRoot ?? kit;
-        bool ok = toolsRoot != null && File.Exists(Path.Combine(toolsRoot, t.Check));
-        r.Add(new KeyValuePair<bool, string>(ok, ok ? (cfg.ToolsRoot != null ? L.T("no recompilador", "in the recompiler folder") : L.T("na pasta do jogo", "in the game folder")) : ""));
-      }
-      r.Add(GameFilesOk(kit));
-      r.Add(new KeyValuePair<bool, string>(Installed, Installed ? Path.GetFileName(GameExe) : ""));
-      return r;
-    });
+    bool installed = Installed;
+    string exeName = installed ? Path.GetFileName(GameExe) : "";
+    var results = await Task.Run(() => DepsCheck.Run(cfg, kit, installed, exeName));
     for (int i = 0; i < deps.Count && i < results.Count; ++i) { deps[i].Ok = results[i].Key; deps[i].Found = results[i].Value; }
     depsChecking = false;
     RenderDeps();
@@ -169,9 +131,7 @@ sealed partial class MainForm {
     depsSummary.ForeColor = shortOfSpace ? Theme.Danger : missing.Count == 0 && !deps.Any(d => d.Ok == null) ? Theme.Accent : Theme.Text2;
   }
 
-  static double FreeGb(string drive) {
-    try { return new DriveInfo(drive).AvailableFreeSpace / (1024.0 * 1024 * 1024); } catch (Exception) { return 0; }
-  }
+  static double FreeGb(string drive) => DepsCheck.FreeGb(drive);
 
   void UpdateDepButtons() {
     if (depsAllButton == null || depsAllButton.IsDisposed) return;
@@ -188,69 +148,6 @@ sealed partial class MainForm {
     log.Clear();
     progress.Value = 0;
     RunSetup(d.Only);
-  }
-
-  // ------------------------------------------------------------------ checks (as setup.ps1 does them)
-
-  static string Run(string exe, string args) {
-    try {
-      var psi = new ProcessStartInfo(exe, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-      using (var p = Process.Start(psi)) {
-        string output = p.StandardOutput.ReadToEnd();
-        if (!p.WaitForExit(30000)) { try { p.Kill(); } catch (Exception) { } return null; }
-        return p.ExitCode == 0 ? output.Trim() : null;
-      }
-    } catch (Exception) { return null; }
-  }
-
-  static KeyValuePair<bool, string> FindPython(string recompRoot) {
-    // The Python that comes inside the launcher ZIP.
-    if (recompRoot != null && File.Exists(Path.Combine(recompRoot, ".local", "python", "python.exe")))
-      return new KeyValuePair<bool, string>(true, L.T("Python (incluído)", "Python (included)"));
-    const string probe = "-c \"import sys, tkinter; assert sys.version_info >= (3, 11); print('%d.%d' % sys.version_info[:2])\"";
-    foreach (var c in new[] { new[] { "py", "-3 " }, new[] { "python", "-B " } }) {
-      string v = Run(c[0], c[1] + probe);
-      if (!string.IsNullOrEmpty(v)) return new KeyValuePair<bool, string>(true, "Python " + v);
-    }
-    string local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Python", "Python312", "python.exe");
-    if (File.Exists(local)) return new KeyValuePair<bool, string>(true, "Python 3.12");
-    return new KeyValuePair<bool, string>(false, "");
-  }
-
-  static KeyValuePair<bool, string> FindBuildTools() {
-    string x86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-    string vswhere = Path.Combine(x86, "Microsoft Visual Studio", "Installer", "vswhere.exe");
-    bool sdk = Directory.Exists(Path.Combine(x86, "Windows Kits", "10", "Include"));
-    string vs = File.Exists(vswhere)
-        ? Run(vswhere, "-latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property displayName") : null;
-    if (!string.IsNullOrEmpty(vs) && sdk) return new KeyValuePair<bool, string>(true, vs.Split('\n')[0].Trim());
-    if (!string.IsNullOrEmpty(vs)) return new KeyValuePair<bool, string>(false, L.T("falta o Windows SDK", "Windows SDK missing"));
-    return new KeyValuePair<bool, string>(false, "");
-  }
-
-  // A complete Clang 20+ already installed is used instead of the download (setup_tools.py).
-  static string SystemLlvm() {
-    string bin = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "LLVM", "bin");
-    string[] needed = { "clang.exe", "clang++.exe", "clang-cl.exe", "lld-link.exe", "llvm-ar.exe", "llvm-rc.exe" };
-    if (!needed.All(n => File.Exists(Path.Combine(bin, n)))) return null;
-    string v = Run(Path.Combine(bin, "clang++.exe"), "--version");
-    var m = v == null ? null : System.Text.RegularExpressions.Regex.Match(v, @"clang version (\d+)");
-    return m != null && m.Success && int.Parse(m.Groups[1].Value) >= 20 ? "Clang " + m.Groups[1].Value + L.T(" do sistema", " (system)") : null;
-  }
-
-  KeyValuePair<bool, string> GameFilesOk(string kit) {
-    if (kit == null || cfg.GameFiles.Count == 0) return new KeyValuePair<bool, string>(false, "");
-    foreach (var kv in cfg.GameFiles) {
-      string path = Path.Combine(kit, kv.Key);
-      if (!File.Exists(path)) return new KeyValuePair<bool, string>(false, "");
-      using (var sha = SHA256.Create())
-      using (var f = File.OpenRead(path)) {
-        string hash = BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "");
-        if (!string.Equals(hash, kv.Value, StringComparison.OrdinalIgnoreCase))
-          return new KeyValuePair<bool, string>(false, L.T("versão diferente", "different version"));
-      }
-    }
-    return new KeyValuePair<bool, string>(true, L.T("versão conferida", "version verified"));
   }
 }
 

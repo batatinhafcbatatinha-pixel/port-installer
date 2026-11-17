@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests of the launcher's shared logic (../launcher/Core), on whatever system runs them:
+       dotnet run -c Release in this folder; tests/test_launcher_core.py runs it too. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>PortLauncher</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);SYSLIB0014;SYSLIB0013;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../launcher/Core/*.cs" Link="Core/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../launcher/recomps.json" LogicalName="recomps.json" />
+  </ItemGroup>
+</Project>

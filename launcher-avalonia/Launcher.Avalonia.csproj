@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The port launcher for Linux and macOS: the same library, recompilers, patches, settings and dependencies as the
+       Windows launcher (../launcher, Windows Forms), drawn with Avalonia and compiled ahead of time into a native
+       program (no .NET to install). The logic is shared: ../launcher/Core.
+       Build: dotnet publish -c Release -r linux-x64 (or osx-arm64, osx-x64) -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Launcher</AssemblyName>
+    <RootNamespace>PortLauncher</RootNamespace>
+    <Deterministic>true</Deterministic>
+    <Product>Port launcher</Product>
+    <Description>Installs, configures and starts PC ports built from your own game disc, inside the recompilers (PS2Recomp games/...).</Description>
+    <Version Condition="'$(Version)' == ''">0.0.0</Version>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SelfContained>true</SelfContained>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <TrimMode>full</TrimMode>
+    <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+    <DebugType>none</DebugType>
+    <StripSymbols>true</StripSymbols>
+    <!-- WebClient is kept on purpose: the same download code runs in the Windows launcher (.NET Framework 4.8). -->
+    <NoWarn>$(NoWarn);SYSLIB0014</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.23" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.23" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.23" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.23" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../launcher/Core/*.cs" Link="Core/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../launcher/recomps.json" LogicalName="recomps.json" />
+    <EmbeddedResource Include="../*.py" LogicalName="pi/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../LICENSE" LogicalName="pi/LICENSE" />
+    <EmbeddedResource Include="../setup/*.ps1;../setup/*.sh;../setup/*.py" LogicalName="pi/setup/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../runtime/*.py;../runtime/*.cmake;../runtime/*.h" LogicalName="pi/runtime/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Assets/port-launcher.png" LogicalName="icon.png" />
+  </ItemGroup>
+</Project>

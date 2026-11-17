@@ -9,7 +9,6 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Web.Script.Serialization;
 
 namespace PortLauncher {
 
@@ -109,7 +108,7 @@ sealed class PatchSource {
         return web.DownloadString($"https://api.github.com/repos/{Repo}/git/trees/{Branch}?recursive=1");
       }
     }, TimeSpan.FromDays(1));
-    var d = new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.DeserializeObject(json) as IDictionary<string, object>;
+    var d = Json.Parse(json) as IDictionary<string, object>;
     var tree = d != null && d.TryGetValue("tree", out var t) ? t as object[] : null;
     return (tree ?? new object[0]).OfType<IDictionary<string, object>>()
         .Where(e => Convert.ToString(e["type"]) == "blob").Select(e => Convert.ToString(e["path"]))
@@ -239,7 +238,7 @@ static class PatchLibrary {
       if (f.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && chosen.Count <= 40) {
         try {
           string text = source.Raw(f);
-          var d = new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.DeserializeObject(text) as IDictionary<string, object>;
+          var d = Json.Parse(text) as IDictionary<string, object>;
           if (d != null && d.ContainsKey("writes") && d.ContainsKey("name")) {
             string version = d.ContainsKey("version") ? Convert.ToString(d["version"]) : "";
             string tested = d.ContainsKey("tested") ? Convert.ToString(d["tested"]) : "";
