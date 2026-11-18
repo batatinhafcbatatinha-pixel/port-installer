@@ -75,7 +75,8 @@ elif [ "$kind" = macos ]; then
   mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
   for f in "$pub"/*; do
     b="$(basename "$f")"
-    case "$b" in *.dSYM|*.dbg) continue ;; esac
+    [ -d "$f" ] && continue   # debug symbols (Launcher.dsym) stay out
+    case "$b" in *.dSYM|*.dsym|*.dbg) continue ;; esac
     if [ -n "$pub2" ] && [ -f "$pub2/$b" ] && ! cmp -s "$f" "$pub2/$b" && lipo -info "$f" 2>/dev/null | grep -q "Non-fat"; then
       lipo -create "$f" "$pub2/$b" -output "$app/Contents/MacOS/$b"   # one program for Apple Silicon and Intel
     else
