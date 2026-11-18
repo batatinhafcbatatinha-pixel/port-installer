@@ -561,10 +561,17 @@ def safe_name(name):
     return cleaned
 
 
+def play_script(config):
+    """The game's start script on this system: Play.cmd -> Play.sh (the launcher does the same)."""
+    play = config.get('play') or ''
+    base, ext = os.path.splitext(play)
+    return base + '.sh' if ext.lower() in ('.cmd', '.bat', '.ps1') else play
+
+
 def make_shortcut(config, root, args, out):
     if args.no_shortcut or args.only or args.prepare_only:
         return
-    play = config.get('play')
+    play = play_script(config)
     if not play or not (root / play).exists():
         return
     if sys.platform == 'darwin':
@@ -629,7 +636,7 @@ def make_parser():
 
 def finish(out, config):
     out.print()
-    play = config.get('play', '')
+    play = play_script(config)
     if config.get('pc_menu') is False:
         say(out, f'Done! Play with {play} (or the desktop shortcut). The PC settings are in the launcher.',
             f'Pronto! Jogue pelo {play} (ou pelo atalho na area de trabalho). As configuracoes de PC ficam no launcher.')

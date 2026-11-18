@@ -102,7 +102,9 @@ What differs from Windows:
   Linux / macOS** and explains it instead of trying. `recomps.json` lists the systems of each recompiler the launcher can
   download (`"platforms"`).
 - Today: PS2Recomp declares Linux and macOS; its games built with `tools/ps2port` (and discs without a profile, the generic
-  path) install on them. The other recompilers (xboxrecomp, rexglue-ports, PSPRecomp, AnyPS5) are Windows only for now.
+  path) install there. Tried: a PlayStation 2 game installed and built through the launcher on Ubuntu 24.04 (WSL). macOS:
+  the launcher is built, tested and started by CI; no game install has been tried on a Mac. The other recompilers
+  (xboxrecomp, rexglue-ports, PSPRecomp, AnyPS5) are Windows only for now.
 - The Windows graphics-card preference and the DXGI card list are Windows only; the monitor list comes from the window
   system and the refresh rates from `xrandr` (Linux).
 
