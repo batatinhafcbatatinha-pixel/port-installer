@@ -180,7 +180,7 @@ sealed partial class MainWindow : Window {
     tbRecomps.Click += (s, e) => ShowRecomps();
     var tbLog = new ToolButton(Glyph.Log, "Log");
     tbLog.Click += (s, e) => SetLogVisible(!logPanel.IsVisible);
-    var left = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+    var left = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, ClipToBounds = true };
     foreach (var c in new Control[] { tbOpen, tbFolders, tbRefresh, new ToolSeparator(), tbPlay, tbStop, tbInstall, new ToolSeparator(), tbSettings, tbDeps, tbRecomps, tbLog })
       left.Children.Add(c);
     if (!Lib) tbFolders.IsVisible = tbRefresh.IsVisible = tbRecomps.IsVisible = false;
@@ -744,15 +744,34 @@ sealed partial class MainWindow : Window {
 
   // ------------------------------------------------------------------ install
 
-  void ClearLog() { logText.Clear(); log.Text = ""; }
+  void ClearLog() { lock (pendingLines) pendingLines.Clear(); logText.Clear(); log.Text = ""; }
+
+  // Lines from the setup arrive by the thousand during a build: they are kept here and shown a few times a second.
+  readonly List<string> pendingLines = new List<string>();
+  DispatcherTimer logTimer;
 
   public void AppendLog(string line) {
     if (line == null) return;
-    if (!Dispatcher.UIThread.CheckAccess()) { Dispatcher.UIThread.Post(() => AppendLog(line)); return; }
-    logText.Append(line).Append('\n');
+    lock (pendingLines) pendingLines.Add(line);
+    Dispatcher.UIThread.Post(() => {
+      if (logTimer != null) return;
+      logTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(150), DispatcherPriority.Background, (s, e) => FlushLog());
+      logTimer.Start();
+      FlushLog();
+    });
+  }
+
+  void FlushLog() {
+    List<string> lines;
+    lock (pendingLines) { lines = new List<string>(pendingLines); pendingLines.Clear(); }
+    if (lines.Count == 0) return;
+    foreach (string line in lines) { logText.Append(line).Append('\n'); StepFrom(line); }
     if (logText.Length > 400000) logText.Remove(0, logText.Length - 300000);
     log.Text = logText.ToString();
     log.CaretIndex = log.Text.Length;
+  }
+
+  void StepFrom(string line) {
     var m = Runner.StepLine.Match(line);
     if (m.Success) {
       progress.Maximum = int.Parse(m.Groups[2].Value);
@@ -1013,6 +1032,7 @@ sealed partial class MainWindow : Window {
   void FinishAuto(int code) {
     if (autoLog == null) return;
     AppendLog("auto-install: exit " + code + " installed=" + Installed);
+    FlushLog();
     try { File.WriteAllText(autoLog, logText.ToString()); } catch (Exception) { }
     autoLog = null;
     Close();
