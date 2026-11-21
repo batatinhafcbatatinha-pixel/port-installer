@@ -339,7 +339,7 @@ static class Tests {
     var g = r.Detect(disc, out _);
     Check(g != null && g.Id == id, "the disc is recognised as the new port");
     Equal("Test Game", g.Name, "name from PARAM.SFO");
-    Check(File.Exists(Path.Combine(g.Dir, "Play.cmd")), "start script");
+    Check(File.Exists(Path.Combine(g.Dir, OS.ScriptName("Play.cmd"))), "start script");
     Equal("build/native/bin/PSPNative.exe", r.ConfigFor(g).Exe, "exe from the generic block");
   }
 
