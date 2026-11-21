@@ -61,6 +61,7 @@ sealed partial class MainForm : Form {
   readonly Dictionary<Setting, Control> rows = new Dictionary<Setting, Control>();
   ChoiceBox monitorCombo, refreshCombo;
   Process running;
+  CancellationTokenSource copying;   // the game files being copied from the disc (GameInstall, in this process)
   bool dirty, loading;
   List<FoundDisc> found = new List<FoundDisc>();
   CancellationTokenSource scanCancel;
@@ -205,8 +206,8 @@ sealed partial class MainForm : Form {
   string GameExe => root == null || cfg.Exe == null ? null : Path.Combine(root, cfg.Exe);
   string IniPath => root == null || cfg.Ini == null ? null : Path.Combine(root, cfg.Ini);
   bool Installed => GameExe != null && File.Exists(GameExe);
-  bool Busy => running != null && !running.HasExited;
-  bool SetupRunning => Busy && running.StartInfo.FileName.EndsWith("powershell.exe", StringComparison.OrdinalIgnoreCase);
+  bool Busy => copying != null || (running != null && !running.HasExited);
+  bool SetupRunning => copying != null || (running != null && !running.HasExited && running.StartInfo.FileName.EndsWith("powershell.exe", StringComparison.OrdinalIgnoreCase));
   GameEntry Current => library?.Selected;
   string RepoName => string.IsNullOrEmpty(cfg.Repo) ? "game" : cfg.Repo.Substring(cfg.Repo.LastIndexOf('/') + 1);
   int K(float v) => (int)Math.Round(v * DeviceDpi / 96f);
@@ -937,13 +938,7 @@ sealed partial class MainForm : Form {
             $"This game ({boot}) has not been converted yet.\n\n{recomp.Name} converts your dump's executable into a Windows program " +
             "(no emulation) and links the game files in place, without copying. It takes a few minutes. Games may still not work or may stop somewhere.\n\nConvert it?"),
             L.T("Converter", "Convert"), L.T("Cancelar", "Cancel"))
-        : !Dialog.Ask(this, Text, L.T(
-            $"Este disco ({boot}) não tem um perfil em {recomp.Name}.\n\nDá para tentar montar mesmo assim com o caminho genérico, que serve para qualquer jogo: " +
-            "ele analisa o seu disco, traduz o jogo inteiro e compila. Jogos sem perfil podem não funcionar ou parar em algum ponto; " +
-            "o que faltar é traduzido enquanto você joga e entra na próxima montagem.\n\nTentar?",
-            $"This disc ({boot}) has no profile in {recomp.Name}.\n\nThe generic path, which works for any game, can still try: " +
-            "it analyses your disc, translates the whole game and compiles it. Games without a profile may not work or may stop somewhere; " +
-            "whatever is missing is translated while you play and goes into the next build.\n\nTry it?"),
+        : !Dialog.Ask(this, Text, Texts.GenericAsk(recomp.Name, boot, Recomp.BootExecutable(path) != null),
             L.T("Tentar", "Try"), L.T("Cancelar", "Cancel"))) return;
     string id = recomp.CreateGenericPort(path, boot);
     if (id == null) { Dialog.Info(this, Text, L.T("Não foi possível ler este disco.", "This disc could not be read.")); return; }
@@ -1123,7 +1118,53 @@ sealed partial class MainForm : Form {
       RefreshStatus();
       return;
     }
+    if (!await CopyGameFiles()) { RefreshStatus(); return; }
     RunSetup();
+  }
+
+  // The game files, copied and checked from the disc by the launcher itself before the setup runs (the setup then
+  // finds them in place). Without a disc chosen yet, the launcher asks for it here.
+  async Task<bool> CopyGameFiles() {
+    if (!Runner.NeedsGameFiles(root)) return true;
+    string source = pendingSource;
+    if (source == null) {
+      using (var d = new OpenFileDialog { Title = L.T("Escolha o disco do jogo: ", "Choose the game's disc: ") + cfg.Disc,
+                                          Filter = L.T("Imagem de disco (*.iso)|*.iso|Todos os arquivos|*.*", "Disc image (*.iso)|*.iso|All files|*.*") }) {
+        if (d.ShowDialog(this) != DialogResult.OK) { stepLabel.Text = L.T("Nenhum disco escolhido.", "No disc chosen."); return false; }
+        source = d.FileName;
+      }
+    }
+    pendingSource = null;
+    copying = new CancellationTokenSource();
+    var token = copying.Token;
+    RefreshStatus();
+    stepLabel.Text = L.T("Copiando os arquivos do jogo...", "Copying the game files...");
+    AppendLog(L.T("== Arquivos do jogo (", "== Game files (") + source + ")");
+    long shown = 0;
+    try {
+      var result = await Task.Run(() => GameInstall.Install(source, root, Path.Combine(root, "installer.json"), AppendLog, (done, total) => {
+        long now = Environment.TickCount;
+        if (now - Interlocked.Read(ref shown) < 200 && done < total) return;
+        Interlocked.Exchange(ref shown, now);
+        try { BeginInvoke(new Action(() => stepLabel.Text = L.T("Copiando e conferindo os arquivos do jogo: ", "Copying and checking the game files: ") + (100 * done / Math.Max(1, total)) + "%")); } catch (Exception) { }
+      }, token));
+      AppendLog(L.T("Arquivos do jogo copiados e conferidos.", "Game files copied and checked."));
+      if (result.CanDeleteSource && Dialog.Ask(this, cfg.Game,
+            L.T("Todos os arquivos foram conferidos e o jogo não precisa mais da imagem do disco.\n\nApagar permanentemente a ISO original?\n", "Every file was checked and the game no longer needs the disc image.\n\nPermanently delete the original ISO?\n") + result.Source,
+            L.T("Apagar", "Delete"), L.T("Manter", "Keep"), true)) {
+        try { GameInstall.DeleteSource(result); AppendLog(L.T("ISO original apagada.", "Original ISO deleted.")); }
+        catch (Exception ex) { AppendLog(ex.Message); }
+      }
+      return true;
+    } catch (Exception ex) {
+      AppendLog(ex.Message);
+      stepLabel.Text = token.IsCancellationRequested ? L.T("Cópia cancelada. O disco não foi alterado.", "Copy cancelled. The disc was not changed.")
+                                                     : L.T("A cópia dos arquivos do jogo parou: ", "Copying the game files stopped: ") + ex.Message;
+      return false;
+    } finally {
+      copying.Dispose();
+      copying = null;
+    }
   }
 
   static readonly Encoding Oem = Encoding.GetEncoding(System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage);
@@ -1171,7 +1212,8 @@ sealed partial class MainForm : Form {
     if (!Dialog.Ask(this, Text, setup ? L.T("Parar agora? Dá para continuar depois: as etapas prontas são puladas.", "Stop now? You can continue later: finished steps are skipped.")
                                       : L.T("Fechar o jogo agora? O que não foi salvo no jogo se perde.", "Close the game now? Anything not saved in the game is lost."),
                     setup ? L.T("Parar", "Stop") : L.T("Fechar o jogo", "Close the game"), L.T("Continuar", "Keep going"), true)) return;
-    KillTree(running.Id);
+    if (copying != null) { copying.Cancel(); return; }
+    if (running != null) KillTree(running.Id);
   }
 
   static void KillTree(int pid) {
@@ -1205,7 +1247,8 @@ sealed partial class MainForm : Form {
       if (!Dialog.Ask(this, Text, SetupRunning ? L.T("A instalação ainda está rodando. Parar e fechar?", "Setup is still running. Stop it and close?")
                                                : L.T("O jogo ainda está aberto. Fechar o jogo e o launcher?", "The game is still open. Close the game and the launcher?"),
                       L.T("Parar e fechar", "Stop and close"), L.T("Voltar", "Back"), true)) { e.Cancel = true; Restart = false; return; }
-      KillTree(running.Id);
+      copying?.Cancel();
+      if (running != null) KillTree(running.Id);
     }
   }
 

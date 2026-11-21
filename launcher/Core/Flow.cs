@@ -105,6 +105,16 @@ static class Texts {
     }
   }
 
+  // The question before building a disc with no profile through the recompiler's generic path. ps2: PS2Recomp also
+  // translates, while the game runs, the code the analysis missed (the next build includes it).
+  public static string GenericAsk(string recomp, string disc, bool ps2) =>
+      L.T($"Este disco ({disc}) não tem um perfil em {recomp}.\n\nDá para tentar montar mesmo assim com o caminho genérico, que serve para qualquer jogo: " +
+          "ele analisa o seu disco, traduz o jogo inteiro e compila. Jogos sem perfil podem não funcionar ou parar em algum ponto" +
+          (ps2 ? "; o que faltar é traduzido enquanto você joga e entra na próxima montagem" : "") + ".\n\nTentar?",
+          $"This disc ({disc}) has no profile in {recomp}.\n\nThe generic path, which works for any game, can still try: " +
+          "it analyses your disc, translates the whole game and compiles it. Games without a profile may not work or may stop somewhere" +
+          (ps2 ? "; whatever is missing is translated while you play and goes into the next build" : "") + ".\n\nTry it?");
+
   public static string NoRuntimeNote(GameEntry e) {
     string who = e.Recomp?.Name ?? e.Known?.Name ?? Consoles.Name(e.Console);
     bool recompHasIt = e.Recomp != null && e.Recomp.Supported;
@@ -203,6 +213,19 @@ static class Runner {
       psi.EnvironmentVariables["LANG"] = L.Pt ? "pt_BR.UTF-8" : "en_US.UTF-8";   // the script speaks the launcher's language
     }
     return psi;
+  }
+
+  // Whether the launcher copies the game files itself before the setup (GameInstall, no installer.py window): the
+  // game has an installer.json, its files are not in game_files yet and it is not a dump the setup links in place.
+  public static bool NeedsGameFiles(string root) {
+    if (root == null) return false;
+    string json = Path.Combine(root, "installer.json");
+    if (!File.Exists(json)) return false;
+    try {
+      var d = Json.Object(File.ReadAllText(json).TrimStart('﻿'));
+      if (d.TryGetValue("mode", out var mode) && Convert.ToString(mode) == "link") return false;
+    } catch (Exception) { return false; }
+    return !GameInstall.GameOk(root, json);
   }
 
   // The game's start script (Play.cmd on Windows, Play.sh on Linux / macOS).

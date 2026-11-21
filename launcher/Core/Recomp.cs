@@ -49,12 +49,71 @@ sealed class Recomp {
     } catch (Exception) { return null; }
   }
 
+  // A PSP disc: its id (UMD_DATA.BIN: ULUS-10041) and name (PARAM.SFO TITLE), else null.
+  public static string PspTitle(string disc, out string name) {
+    name = SfoTitle(ReadDiscFile(disc, "PSP_GAME/PARAM.SFO"));
+    byte[] umd = ReadDiscFile(disc, "UMD_DATA.BIN");
+    string id = umd == null ? null : Encoding.ASCII.GetString(umd).Split('|')[0].Trim('\0', ' ');
+    return string.IsNullOrEmpty(id) ? null : id;
+  }
+
+  // The TITLE of a PARAM.SFO.
+  public static string SfoTitle(byte[] d) {
+    try {
+      if (d == null || d.Length < 20 || d[0] != 0 || d[1] != (byte)'P' || d[2] != (byte)'S' || d[3] != (byte)'F') return null;
+      int keys = BitConverter.ToInt32(d, 8), values = BitConverter.ToInt32(d, 12), count = BitConverter.ToInt32(d, 16);
+      for (int i = 0; i < count; ++i) {
+        int e = 20 + i * 16;
+        int keyOff = BitConverter.ToUInt16(d, e), len = BitConverter.ToInt32(d, e + 4), dataOff = BitConverter.ToInt32(d, e + 12);
+        int k = keys + keyOff, end = Array.IndexOf(d, (byte)0, k);
+        if (end < 0 || Encoding.ASCII.GetString(d, k, end - k) != "TITLE") continue;
+        string t = Encoding.UTF8.GetString(d, values + dataOff, len).Split('\0')[0].Trim();
+        return t.Length > 0 ? t : null;
+      }
+    } catch (Exception) { }
+    return null;
+  }
+
+  // An original Xbox disc: the title id of default.xbe's certificate (4D530004) and its title name, else null.
+  public static string XboxTitle(string disc, out string name) {
+    name = null;
+    try {
+      byte[] x = ReadDiscFile(disc, "default.xbe", false, 1 << 20);
+      if (x == null || x.Length < 0x178 || Encoding.ASCII.GetString(x, 0, 4) != "XBEH") return null;
+      uint baseAddr = BitConverter.ToUInt32(x, 0x104), cert = BitConverter.ToUInt32(x, 0x118);
+      long c = (long)cert - baseAddr;
+      if (c < 0 || c + 0x0C + 80 > x.Length) return null;
+      uint titleId = BitConverter.ToUInt32(x, (int)c + 8);
+      name = Encoding.Unicode.GetString(x, (int)c + 0x0C, 80).Split('\0')[0].Trim();
+      if (name.Length == 0) name = null;
+      return titleId.ToString("X8");
+    } catch (Exception) { return null; }
+  }
+
+  // An Xbox 360 disc: the title id of default.xex (its execution info header), else null.
+  public static string X360Title(string disc) {
+    try {
+      byte[] x = ReadDiscFile(disc, "default.xex", false, 1 << 16);
+      if (x == null || x.Length < 0x18 || Encoding.ASCII.GetString(x, 0, 4) != "XEX2") return null;
+      uint Be(int o) => (uint)(x[o] << 24 | x[o + 1] << 16 | x[o + 2] << 8 | x[o + 3]);
+      uint count = Be(0x14);
+      for (uint i = 0; i < count && 0x18 + i * 8 + 8 <= x.Length; ++i) {
+        int e = (int)(0x18 + i * 8);
+        if (Be(e) != 0x00040006u) continue;
+        int info = (int)Be(e + 4);
+        return info + 16 <= x.Length ? Be(info + 12).ToString("X8") : null;
+      }
+    } catch (Exception) { }
+    return null;
+  }
+
   // A port folder for a disc that has no profile in the repository: built by the generic pipeline (tools/ps2port;
   // PS5 dumps: tools/ps5port, with the game linked instead of copied). Returns the new game's id, or null when the disc cannot be read.
   public string CreateGenericPort(string disc, string boot) {
     if (Generic == null || boot == null) return null;
     string ps5 = Ps5Title(disc, out string ps5Name);
     if (ps5 != null) return CreatePs5Port(disc, ps5, ps5Name);
+    if (BootExecutable(disc) == null) return CreateDiscPort(disc);
     byte[] cnf = ReadDiscFile(disc, "SYSTEM.CNF"), elf = ReadDiscFile(disc, boot);
     if (cnf == null || elf == null) return null;
     string id = boot.Replace('.', '_').Replace('_', '-');   // SLUS_214.23 -> SLUS-214-23
@@ -83,6 +142,85 @@ sealed class Recomp {
       Shortcuts.MakeExecutable(sh);
     }
     return id;
+  }
+
+  // PSP, Xbox and Xbox 360 discs: the port folder is named after the disc's id (ULUS-10041, 4D530004) and recognises
+  // the disc again by the SHA-256 of its identity files (PSP: UMD_DATA.BIN + PARAM.SFO; Xbox: default.xbe; Xbox 360:
+  // default.xex). The build itself is the recompiler's "generic" steps; "play_cmd" is the start script.
+  string CreateDiscPort(string disc) {
+    string console = Consoles.Identify(disc, out string label), name = null, fs, what;
+    string[] identity;
+    switch (console) {
+      case "psp": label = PspTitle(disc, out name); identity = new[] { "UMD_DATA.BIN", "PSP_GAME/PARAM.SFO" }; fs = "iso9660"; what = "PSP"; break;
+      case "xbox": label = XboxTitle(disc, out name); identity = new[] { "default.xbe" }; fs = "xdvdfs"; what = "Xbox"; break;
+      case "x360": label = X360Title(disc); identity = new[] { "default.xex" }; fs = "xdvdfs"; what = "Xbox 360"; break;
+      default: return null;
+    }
+    if (label == null) return null;
+    var required = new Dictionary<string, object>();
+    var sizes = new Dictionary<string, object>();
+    foreach (string rel in identity) {
+      string sha = DiscFileSha256(disc, rel, out long size);
+      if (sha == null) return null;
+      required[rel] = sha;
+      sizes[rel] = size;
+    }
+    string id = Regex.Replace(label, @"[^A-Za-z0-9_-]", "-");
+    string dir = Path.Combine(PortsDir, id);
+    Directory.CreateDirectory(dir);
+    string title = name ?? (Directory.Exists(disc) ? new DirectoryInfo(disc).Name : Path.GetFileNameWithoutExtension(disc));
+    var setup = new Dictionary<string, object>(Generic);
+    setup.Remove("play_cmd");
+    setup["game"] = title;
+    setup["disc"] = what + " (" + label + ")";
+    File.WriteAllText(Path.Combine(dir, "setup.json"), PortLauncher.Json.Write(setup));
+    var installer = new Dictionary<string, object> {
+      ["schema"] = 1, ["name"] = title, ["revision"] = label, ["filesystem"] = fs, ["destination"] = "game_files",
+      ["required_files"] = required, ["expected_files"] = sizes, ["required_paths"] = new object[0],
+    };
+    File.WriteAllText(Path.Combine(dir, "installer.json"), PortLauncher.Json.Write(installer));
+    string play = Str(Generic, "play_cmd");
+    if (play != null) {
+      string file = Path.Combine(dir, OS.ScriptName(Str(Generic, "play", "Play.cmd")));
+      File.WriteAllText(file, play);
+      Shortcuts.MakeExecutable(file);
+    }
+    return id;
+  }
+
+  // The SHA-256 (lower case) and size of one file of a disc image or extracted folder, whatever its size; null when missing.
+  public static string DiscFileSha256(string disc, string rel, out long size) {
+    size = 0;
+    try {
+      using (var sha = System.Security.Cryptography.SHA256.Create()) {
+        if (Directory.Exists(disc)) {
+          string f = Path.Combine(disc, rel.Replace('/', Path.DirectorySeparatorChar));
+          if (!File.Exists(f)) return null;
+          using (var h = File.OpenRead(f)) { size = h.Length; return BitConverter.ToString(sha.ComputeHash(h)).Replace("-", "").ToLowerInvariant(); }
+        }
+        using (var h = File.OpenRead(disc)) {
+          List<GameInstall.Entry> entries = null;
+          foreach (string fs in new[] { "xdvdfs", "iso9660" }) {
+            try { entries = GameInstall.Inventory(h, h.Length, fs); break; } catch (InvalidDataException) { }
+          }
+          var e = entries?.FirstOrDefault(x => string.Equals(x.Path, rel, StringComparison.OrdinalIgnoreCase));
+          if (e == null) return null;
+          size = e.Size;
+          var buf = new byte[1 << 20];
+          foreach (var (offset, length) in e.Extents) {
+            h.Seek(offset, SeekOrigin.Begin);
+            for (long left = length; left > 0;) {
+              int n = h.Read(buf, 0, (int)Math.Min(buf.Length, left));
+              if (n <= 0) return null;
+              sha.TransformBlock(buf, 0, n, null, 0);
+              left -= n;
+            }
+          }
+          sha.TransformFinalBlock(new byte[0], 0, 0);
+          return BitConverter.ToString(sha.Hash).Replace("-", "").ToLowerInvariant();
+        }
+      }
+    } catch (Exception) { return null; }
   }
 
   // A PS5 dump: the game stays where it is (installer.json "mode": "link" makes game_files a junction to it);
@@ -253,6 +391,7 @@ sealed class Recomp {
     try {
       byte[] umd = ReadDiscFile(path, "UMD_DATA.BIN");
       if (umd != null) label = Encoding.ASCII.GetString(umd).Split('|')[0].Trim('\0', ' ');
+      label = label ?? XboxTitle(path, out _) ?? X360Title(path);
       foreach (var g in Games) {
         var small = g.Required.Where(kv => g.Sizes.TryGetValue(kv.Key, out long n) && n <= (16 << 20)).ToList();
         if (small.Count == 0) continue;
@@ -283,7 +422,7 @@ sealed class Recomp {
 
   // A file (up to 16 MB) of an extracted folder or of an ISO 9660 image with 2048-byte sectors; null when missing.
   // A file of an Xbox / Xbox 360 disc image (XDVDFS): plain XISO or a full XGD1/2/3 image; null when not XDVDFS.
-  static byte[] XdvdfsFile(string iso, string rel, bool probe = false) {
+  static byte[] XdvdfsFile(string iso, string rel, bool probe = false, int head = 0) {
     using (var f = File.OpenRead(iso)) {
       long[] partitions = { 0, 0x18300000, 0x0FD90000, 0x02080000 };
       var vd = new byte[2048];
@@ -323,7 +462,8 @@ sealed class Recomp {
         }
         if (isDir) return null;
         if (probe) return new byte[0];
-        if (size > (16u << 20)) return null;
+        if (head > 0) size = Math.Min(size, (uint)head);
+        else if (size > (16u << 20)) return null;
         var data = new byte[size];
         f.Seek(part + (long)sector * 2048, SeekOrigin.Begin);
         int got = 0;
@@ -337,14 +477,24 @@ sealed class Recomp {
   // Whether a disc image or extracted folder has the file, whatever its size.
   public static bool DiscHas(string disc, string rel) => ReadDiscFile(disc, rel, true) != null;
 
-  public static byte[] ReadDiscFile(string disc, string rel, bool probe = false) {
+  // head > 0: only the first head bytes, whatever the file's size (an executable's header).
+  public static byte[] ReadDiscFile(string disc, string rel, bool probe = false, int head = 0) {
     if (Directory.Exists(disc)) {
       string f = Path.Combine(disc, rel.Replace('/', Path.DirectorySeparatorChar));
       if (probe) return File.Exists(f) ? new byte[0] : null;
-      return File.Exists(f) && new FileInfo(f).Length <= (16 << 20) ? File.ReadAllBytes(f) : null;
+      if (!File.Exists(f)) return null;
+      if (head > 0) {
+        using (var h = File.OpenRead(f)) {
+          var buf = new byte[Math.Min(h.Length, head)];
+          int got = 0;
+          while (got < buf.Length) { int n = h.Read(buf, got, buf.Length - got); if (n <= 0) break; got += n; }
+          return buf;
+        }
+      }
+      return new FileInfo(f).Length <= (16 << 20) ? File.ReadAllBytes(f) : null;
     }
     if (!File.Exists(disc)) return null;
-    byte[] xbox = XdvdfsFile(disc, rel, probe);
+    byte[] xbox = XdvdfsFile(disc, rel, probe, head);
     if (xbox != null) return xbox;
     using (var f = File.OpenRead(disc)) {
       var pvd = new byte[2048];
@@ -375,7 +525,8 @@ sealed class Recomp {
         if (!found) return null;
       }
       if (probe) return new byte[0];
-      if (size > (16u << 20)) return null;
+      if (head > 0) size = Math.Min(size, (uint)head);
+      else if (size > (16u << 20)) return null;
       var data = new byte[size];
       f.Seek((long)lba * 2048, SeekOrigin.Begin);
       int got = 0;

@@ -120,7 +120,8 @@ What differs from Windows:
 | `tools/make_bundle.py` | Builds a recompiler's player ZIP: source + `Launcher.exe` + Python (python-build-standalone, pinned) + CMake/Ninja (pins of `setup/setup_tools.py`), for a local build; releases no longer carry these bundles (each recompiler's own release workflow makes its ZIPs). |
 | `setup/setup.ps1`, `setup/setup_tools.py` | The install and build steps (shared by every port). `-GameDir` = one game folder, `-ToolsDir` = shared tools, `-Source` = the disc image; `-Only python\|buildtools\|tools\|game`. |
 | `setup/setup.sh`, `setup/setup_posix.py` | The same steps on Linux and macOS: `--game-dir`, `--tools-dir`, `--source`, `--only ...`, `--yes`. |
-| `installer.py`, `engine.py`, `media.py`, `layout.py` | Game-file installer: ISO 9660 (PS2) and XDVDFS (Xbox/360) or a folder, SHA-256 check against `installer.json`, progress, resume. `--source` starts at once. |
+| `launcher/Core/GameInstall.cs` | The launcher's own game-file installer (no window, no Python): the same work as `engine.py` (ISO 9660 / XDVDFS image or folder, SHA-256 check against `installer.json`, copy with read-back check, `.disc` index), byte for byte the same output. The launcher runs it before the setup, whose game step then finds the files in place. |
+| `installer.py`, `engine.py`, `media.py`, `layout.py` | Game-file installer for `Setup.cmd` run without the launcher: ISO 9660 (PS2) and XDVDFS (Xbox/360) or a folder, SHA-256 check against `installer.json`, progress, resume. `--source` starts at once. Under the launcher (`PORT_LAUNCHER=1`) the setup never opens it. |
 | `prepare_folder.py` | Sector layout for an extracted folder (`game_files/.disc/`), used by the PS2 runtime instead of an ISO. |
 | `runtime/` | CMake glue that makes the PS2Recomp CD readers use the extracted folder. |
 | `integrations/` | `installer.json` of the single-game kits. |
