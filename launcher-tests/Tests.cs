@@ -258,6 +258,96 @@ static class Tests {
     Equal(1, n, "the same folder once");
     Check(GameFolders.Load().Contains(a), "saved without the trailing separator");
   }
+
+  // ------------------------------------------------------------------ game files (GameInstall)
+
+  static string Sha(byte[] b) { using (var h = System.Security.Cryptography.SHA256.Create()) return BitConverter.ToString(h.ComputeHash(b)).Replace("-", "").ToLowerInvariant(); }
+
+  static void TestGameInstallFromFolder() {
+    string src = Temp(), root = Temp();
+    byte[] boot = System.Text.Encoding.ASCII.GetBytes("BOOT2 = cdrom0:\\SLUS_000.01;1\n"), elf = new byte[5 << 20];
+    new Random(1).NextBytes(elf);
+    File.WriteAllBytes(Path.Combine(src, "SYSTEM.CNF"), boot);
+    File.WriteAllBytes(Path.Combine(src, "SLUS_000.01"), elf);
+    Directory.CreateDirectory(Path.Combine(src, "DATA"));
+    File.WriteAllText(Path.Combine(src, "DATA", "a.txt"), "hello");
+    string json = Path.Combine(root, "installer.json");
+    File.WriteAllText(json, "{\"schema\": 1, \"name\": \"T\", \"filesystem\": \"iso9660\", \"destination\": \"game_files\", " +
+                            "\"required_files\": {\"SLUS_000.01\": \"" + Sha(elf) + "\"}, \"expected_files\": {\"SYSTEM.CNF\": " + boot.Length + "}, \"required_paths\": [\"DATA\"]}");
+    Check(Runner.NeedsGameFiles(root), "needs files before the copy");
+    long last = 0, total = 0;
+    var r = GameInstall.Install(src, root, json, _ => { }, (d, t) => { last = d; total = t; }, System.Threading.CancellationToken.None);
+    Equal(total, last, "progress reaches the total");
+    Check(!r.CanDeleteSource, "a folder is never offered for deletion");
+    Check(GameInstall.GameOk(root, json) && !Runner.NeedsGameFiles(root), "files in place");
+    Equal("hello", File.ReadAllText(Path.Combine(root, "game_files", "DATA", "a.txt")), "copied file");
+    string tsv = File.ReadAllText(Path.Combine(root, "game_files", ".disc", "layout.tsv"));
+    Check(tsv.StartsWith("EXTRACTED_DISC_V1\t") && tsv.Contains("\tSLUS_000.01\n"), "disc index written");
+    // A second run compares instead of copying; a different executable is refused and the copy is kept.
+    GameInstall.Install(src, root, json, _ => { }, (d, t) => { }, System.Threading.CancellationToken.None);
+    elf[0] ^= 1;
+    File.WriteAllBytes(Path.Combine(src, "SLUS_000.01"), elf);
+    bool refused = false;
+    try { GameInstall.Install(src, root, json, _ => { }, (d, t) => { }, System.Threading.CancellationToken.None); } catch (InvalidDataException) { refused = true; }
+    Check(refused && GameInstall.GameOk(root, json), "another revision is refused, the good copy stays");
+    // A cancelled copy leaves no partial file behind.
+    string root2 = Temp();
+    File.Copy(json, Path.Combine(root2, "installer.json"));
+    elf[0] ^= 1;
+    File.WriteAllBytes(Path.Combine(src, "SLUS_000.01"), elf);
+    var cts = new System.Threading.CancellationTokenSource();
+    bool cancelled = false;
+    try { GameInstall.Install(src, root2, Path.Combine(root2, "installer.json"), _ => { }, (d, t) => cts.Cancel(), cts.Token); } catch (OperationCanceledException) { cancelled = true; }
+    Check(cancelled, "cancel stops the copy");
+    Check(!Directory.EnumerateFiles(root2, "*.part", SearchOption.AllDirectories).Any() && !File.Exists(Path.Combine(root2, ".game-install.lock")), "no partial files or lock left");
+  }
+
+  // A PARAM.SFO with one TITLE entry.
+  static byte[] Sfo(string title) {
+    byte[] key = System.Text.Encoding.ASCII.GetBytes("TITLE\0\0\0"), value = new byte[128];
+    byte[] t = System.Text.Encoding.UTF8.GetBytes(title);
+    Array.Copy(t, value, t.Length);
+    var d = new List<byte>();
+    d.AddRange(new byte[] { 0, (byte)'P', (byte)'S', (byte)'F', 1, 1, 0, 0 });
+    d.AddRange(BitConverter.GetBytes(20 + 16));            // key table
+    d.AddRange(BitConverter.GetBytes(20 + 16 + key.Length)); // data table
+    d.AddRange(BitConverter.GetBytes(1));
+    d.AddRange(BitConverter.GetBytes((ushort)0)); d.AddRange(BitConverter.GetBytes((ushort)0x0204));
+    d.AddRange(BitConverter.GetBytes(t.Length + 1)); d.AddRange(BitConverter.GetBytes(128)); d.AddRange(BitConverter.GetBytes(0));
+    d.AddRange(key); d.AddRange(value);
+    return d.ToArray();
+  }
+
+  static void TestGenericPspPort() {
+    string disc = Temp(), repo = Temp();
+    Directory.CreateDirectory(Path.Combine(disc, "PSP_GAME", "SYSDIR"));
+    File.WriteAllText(Path.Combine(disc, "UMD_DATA.BIN"), "ULUS-12345|0123456789ABCDEF|0001|G");
+    File.WriteAllBytes(Path.Combine(disc, "PSP_GAME", "PARAM.SFO"), Sfo("Test Game"));
+    File.WriteAllBytes(Path.Combine(disc, "PSP_GAME", "SYSDIR", "EBOOT.BIN"), new byte[] { 0x7F, (byte)'E', (byte)'L', (byte)'F' });
+    Directory.CreateDirectory(Path.Combine(repo, "profiles"));
+    File.WriteAllText(Path.Combine(repo, "launcher.json"),
+        "{\"recomp\": \"PSPRecomp\", \"games_dir\": \"profiles\", \"generic\": {\"play\": \"Play.cmd\", \"play_cmd\": \"@echo off\\r\\n\", " +
+        "\"exe\": \"build/native/bin/PSPNative.exe\", \"steps\": []}, \"generic_label\": \"^[A-Z]{4}-\\\\d{5}$\"}");
+    Equal("psp", Consoles.Identify(disc, out string label), "console");
+    Equal("ULUS-12345", label, "label");
+    var r = Recomp.Load(repo);
+    Check(r.Generic != null && System.Text.RegularExpressions.Regex.IsMatch(label, r.LabelRegex), "generic label matches");
+    Check(r.Detect(disc, out _) == null, "no profile before");
+    string id = r.CreateGenericPort(disc, label);
+    Equal("ULUS-12345", id, "port id");
+    r = Recomp.Load(repo);
+    var g = r.Detect(disc, out _);
+    Check(g != null && g.Id == id, "the disc is recognised as the new port");
+    Equal("Test Game", g.Name, "name from PARAM.SFO");
+    Check(File.Exists(Path.Combine(g.Dir, "Play.cmd")), "start script");
+    Equal("build/native/bin/PSPNative.exe", r.ConfigFor(g).Exe, "exe from the generic block");
+  }
+
+  static void TestGameInstallSafePaths() {
+    foreach (string bad in new[] { "../x", "a/../b", "CON", "a/NUL.txt", "a\\b", "/abs", "x:y", "trail." })
+      try { GameInstall.SafePath(bad); throw new Exception("accepted " + bad); } catch (InvalidDataException) { }
+    GameInstall.SafePath("PSP_GAME/SYSDIR/EBOOT.BIN");
+  }
 }
 
 }

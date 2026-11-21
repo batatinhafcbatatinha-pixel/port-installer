@@ -191,8 +191,13 @@ if (-not (Game-Ok) -and $Install.mode -eq 'link') {
   if ($LASTEXITCODE -ne 0) { Fail "Could not link game_files to $target." "Nao foi possivel ligar game_files a $target." }
   Say "game_files -> $Source" "game_files -> $Source"
 }
+if (-not (Game-Ok) -and $env:PORT_LAUNCHER -eq '1') {
+  # The launcher copies and checks the game files itself before it starts this script; no installer window here.
+  Fail "game_files does not hold the supported version: $($Setup.disc). Choose the game's disc in the launcher." `
+       "game_files nao contem a versao suportada: $($Setup.disc). Escolha o disco do jogo no launcher."
+}
 if (-not (Game-Ok)) {
-  # The installer next to this script (port-installer/setup), else the kit's submodule.
+  # Setup.cmd run on its own: the installer window next to this script (port-installer/setup), else the kit's submodule.
   $installer = Join-Path (Split-Path -Parent $PSScriptRoot) 'installer.py'
   if (-not (Test-Path -LiteralPath $installer)) { $installer = Join-Path $Root 'tools\port-installer\installer.py' }
   Say 'A window opens: choose your disc image (.iso) or extracted game folder, then wait for it to finish.' `

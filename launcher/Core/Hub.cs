@@ -33,7 +33,8 @@ static class Consoles {
     }
   }
 
-  // Which console a disc image or extracted disc folder is for, and its label (PS2 boot file, PSP disc id, PS5 title id).
+  // Which console a disc image or extracted disc folder is for, and its label (PS2 boot file, PSP disc id, PS5 title id,
+  // Xbox / Xbox 360 title id).
   public static string Identify(string path, out string label) {
     label = Recomp.BootExecutable(path);
     if (label != null) return "ps2";
@@ -43,8 +44,8 @@ static class Consoles {
       byte[] umd = Recomp.ReadDiscFile(path, "UMD_DATA.BIN");
       if (umd != null) { label = Encoding.ASCII.GetString(umd).Split('|')[0].Trim('\0', ' '); return "psp"; }
       if (Recomp.DiscHas(path, "PSP_GAME/PARAM.SFO")) return "psp";
-      if (Recomp.DiscHas(path, "default.xex")) return "x360";
-      if (Recomp.DiscHas(path, "default.xbe")) return "xbox";
+      if (Recomp.DiscHas(path, "default.xex")) { label = Recomp.X360Title(path); return "x360"; }
+      if (Recomp.DiscHas(path, "default.xbe")) { label = Recomp.XboxTitle(path, out _); return "xbox"; }
     } catch (Exception) { }
     return null;
   }

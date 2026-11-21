@@ -417,6 +417,10 @@ def step_game(config, install, root, args, out):
     if not game_ok(root, install) and install.get('mode') == 'link':
         target = link_game_files(root, args.source)
         say(out, f'game_files -> {target}', f'game_files -> {target}')
+    if not game_ok(root, install) and os.environ.get('PORT_LAUNCHER') == '1':
+        # The launcher copies and checks the game files itself before it starts this script; no installer window here.
+        raise SetupError(f'game_files does not hold the supported version: {config.get("disc", "")}. Choose the disc of the game in the launcher.',
+                         f'game_files nao contem a versao suportada: {config.get("disc", "")}. Escolha o disco do jogo no launcher.')
     if not game_ok(root, install):
         own = Path(__file__).resolve().parents[1] / 'installer.py'
         installer = own if own.is_file() else root / 'tools/port-installer/installer.py'
