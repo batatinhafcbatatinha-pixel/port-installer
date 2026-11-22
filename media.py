@@ -1,6 +1,6 @@
 """Bounded ISO9660 and XDVDFS readers. No external extraction programs."""
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import struct
 
 SECTOR = 2048
@@ -23,6 +23,135 @@ class Entry:
     path: str
     size: int
     extents: list
+
+
+STFS_MAGIC = (b'LIVE', b'PIRS', b'CON ')
+STFS_BLOCK = 0x1000
+
+
+def is_stfs(path):
+    """An Xbox 360 package (STFS: Xbox Live Arcade games, games on demand, title updates)."""
+    try:
+        if path.stat().st_size < 0xB000:
+            return False
+        with path.open('rb') as f:
+            return f.read(4) in STFS_MAGIC
+    except OSError:
+        return False
+
+
+def stfs_package(path):
+    """The package a source names: the file itself, or the first package in a folder laid out as the console keeps
+    them (<title id>/<content type>/<package>, file names without an extension); else None."""
+    path = Path(path)
+    if path.is_file():
+        return path if is_stfs(path) else None
+    if not path.is_dir():
+        return None
+    checked, level = 0, [path]
+    for _ in range(4):
+        nxt = []
+        for folder in level:
+            for p in sorted(folder.iterdir()):
+                if p.is_dir() and not p.is_symlink():
+                    nxt.append(p)
+                elif p.is_file() and '.' not in p.name:
+                    checked += 1
+                    if checked > 64:
+                        return None
+                    if is_stfs(p):
+                        return p
+        level = nxt
+    return None
+
+
+def stfs_inventory(read, add, size):
+    """Files of an STFS package. Data blocks are numbered without the hash tables interleaved with them: a level-0
+    table before every 170 blocks, a level-1 table before every 170*170 and one level-2 table, each one block long
+    (read-only packages, flag bit 0) or two. A file is a run of blocks (contiguous flag) or a chain through the
+    level-0 hash entries."""
+    head = read(0, 0x1000)
+    if head[:4] not in STFS_MAGIC:
+        raise ValueError('Pacote Xbox 360 (STFS) não encontrado')
+    header_size, = struct.unpack_from('>I', head, 0x340)
+    volume_type, = struct.unpack_from('>I', head, 0x3A9)
+    if head[0x379] != 0x24 or volume_type != 0:
+        raise ValueError('Pacote Xbox 360 sem volume STFS')
+    flags = head[0x37B]
+    table_blocks, = struct.unpack_from('<H', head, 0x37C)
+    table_start = int.from_bytes(head[0x37E:0x381], 'little')
+    allocated, = struct.unpack_from('>I', head, 0x395)
+    shift = 0 if flags & 1 else 1
+    base = (header_size + 0xFFF) & ~0xFFF
+    if not 0 < table_blocks <= 4096 or allocated > 0xFFFFFF:
+        raise ValueError('Tabela de arquivos STFS inválida')
+
+    def offset(block):
+        if block >= allocated:
+            raise ValueError('Bloco STFS fora do pacote')
+        b = block + (((block // 170) + 1) << shift)
+        if block >= 170:
+            b += ((block // 28900) + 1) << shift
+            if block >= 28900:
+                b += 1 << shift
+        return base + b * STFS_BLOCK
+
+    def following(block):
+        if shift:
+            raise ValueError('Pacote STFS com duas tabelas de hash por nível: arquivo fragmentado não suportado')
+        entry = read(offset(block // 170 * 170) - STFS_BLOCK + block % 170 * 0x18, 0x18)
+        return int.from_bytes(entry[0x15:0x18], 'big')
+
+    table, block = b'', table_start
+    for i in range(table_blocks):
+        table += read(offset(block), STFS_BLOCK)
+        if i + 1 < table_blocks:
+            block = following(block) if not shift else block + 1
+    records = {}
+    for i in range(len(table) // 0x40):
+        e = table[i * 0x40:(i + 1) * 0x40]
+        if not e[0x28] & 0x3F:
+            continue
+        records[i] = (e[:e[0x28] & 0x3F].decode('ascii'), e[0x28],
+                      int.from_bytes(e[0x2F:0x32], 'little'), struct.unpack_from('>h', e, 0x32)[0],
+                      struct.unpack_from('>I', e, 0x34)[0])
+
+    def full(i):
+        parts, seen = [], set()
+        while i != -1:
+            if i in seen or i not in records or len(parts) > 64:
+                raise ValueError('Estrutura de diretórios inválida')
+            seen.add(i)
+            parts.append(records[i][0])
+            i = records[i][3]
+        return '/'.join(reversed(parts))
+
+    for i, (name, fl, start, parent, length) in sorted(records.items()):
+        safe_path(name)
+        if fl & 0x80:
+            continue
+        extents, block, left = [], start, length
+        for _ in range(-(-length // STFS_BLOCK)):
+            o, n = offset(block), min(STFS_BLOCK, left)
+            if extents and extents[-1][0] + extents[-1][1] == o:
+                extents[-1] = (extents[-1][0], extents[-1][1] + n)
+            else:
+                extents.append((o, n))
+            left -= n
+            if left:
+                block = block + 1 if fl & 0x40 else following(block)
+        add(full(i), length, extents)
+
+
+def stfs_title(package):
+    """The display name an Xbox 360 package carries (UTF-16 BE at 0x411), or None."""
+    try:
+        with Path(package).open('rb') as f:
+            f.seek(0x411)
+            name = f.read(0x80).decode('utf-16-be', 'replace').split('\0')[0].strip()
+        return name or None
+    except OSError:
+        return None
 
 
 def inventory(stream, size, filesystem):
@@ -143,6 +272,8 @@ def inventory(stream, size, filesystem):
             if continuation:
                 raise ValueError('Multiextensão incompleta')
         walk(pvd[156:156+pvd[156]])
+    elif filesystem == 'stfs':
+        stfs_inventory(read, add, size)
     else:
         raise ValueError('Sistema de arquivos não suportado')
     for entry in entries:

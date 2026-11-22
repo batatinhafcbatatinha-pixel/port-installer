@@ -8,7 +8,7 @@ import shutil
 import threading
 import uuid
 
-from media import Entry, inventory, safe_path
+from media import Entry, inventory, safe_path, stfs_package
 from layout import build_layout
 
 BLOCK = 4 << 20
@@ -56,6 +56,9 @@ def _install(source, root, config, emit, cancel):
 
     emit(dict(type='status', text='Lendo arquivos da origem…'))
     output = target_path(root, config.get('destination', 'game_files'))
+    if config.get('filesystem') == 'stfs':
+        # An Xbox 360 package: the file, or the folder the console keeps it in (<title id>/<type>/<package>).
+        source = stfs_package(source) or source
     is_iso = source.is_file()
     if not is_iso and not source.is_dir():
         raise ValueError('Selecione uma ISO ou pasta existente')

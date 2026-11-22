@@ -178,6 +178,8 @@ static class GameInstall {
       var root = new byte[pvd[156]];
       Array.Copy(pvd, 156, root, 0, root.Length);
       Walk(root, "", 0);
+    } else if (filesystem == "stfs") {
+      StfsInventory(Read, Add);
     } else {
       throw new InvalidDataException(L.T("Sistema de arquivos não suportado: ", "Unsupported file system: ") + filesystem);
     }
@@ -185,6 +187,140 @@ static class GameInstall {
       if (e.Extents.Any(x => x.Offset + x.Length > size)) throw new InvalidDataException(L.T("Arquivo fora da imagem", "File outside the image"));
     if (entries.Count == 0) throw new InvalidDataException(L.T("Nenhum arquivo na imagem", "No files in the image"));
     return entries;
+  }
+
+  // ------------------------------------------------------------------ Xbox 360 packages (media.py stfs_*)
+
+  const int StfsBlock = 0x1000;
+
+  static bool IsStfs(string file) {
+    try {
+      if (new FileInfo(file).Length < 0xB000) return false;
+      using (var h = File.OpenRead(file)) {
+        var b = new byte[4];
+        if (h.Read(b, 0, 4) != 4) return false;
+        string m = Encoding.ASCII.GetString(b);
+        return m == "LIVE" || m == "PIRS" || m == "CON ";
+      }
+    } catch (Exception) { return false; }
+  }
+
+  // An Xbox 360 package (STFS: Xbox Live Arcade games, games on demand, title updates): the file itself, or the first
+  // one in a folder laid out as the console keeps them (<title id>/<content type>/<package>, names without an
+  // extension); else null.
+  public static string StfsPackage(string path) {
+    try {
+      if (File.Exists(path)) return IsStfs(path) ? path : null;
+      if (!Directory.Exists(path)) return null;
+      int checkedFiles = 0;
+      var level = new List<string> { path };
+      for (int depth = 0; depth < 4; ++depth) {
+        var next = new List<string>();
+        foreach (string folder in level)
+          foreach (string p in Directory.GetFileSystemEntries(folder).OrderBy(x => x, StringComparer.Ordinal)) {
+            if ((File.GetAttributes(p) & FileAttributes.ReparsePoint) != 0) continue;
+            if (Directory.Exists(p)) { next.Add(p); continue; }
+            if (Path.GetFileName(p).Contains('.')) continue;
+            if (++checkedFiles > 64) return null;
+            if (IsStfs(p)) return p;
+          }
+        level = next;
+      }
+    } catch (Exception) { }
+    return null;
+  }
+
+  // The display name an Xbox 360 package carries (UTF-16 BE at 0x411), or null.
+  public static string StfsTitle(string package) {
+    try {
+      using (var h = File.OpenRead(package)) {
+        var b = new byte[0x80];
+        h.Seek(0x411, SeekOrigin.Begin);
+        if (h.Read(b, 0, b.Length) != b.Length) return null;
+        string name = Encoding.BigEndianUnicode.GetString(b).Split('\0')[0].Trim();
+        return name.Length > 0 ? name : null;
+      }
+    } catch (Exception) { return null; }
+  }
+
+  // Files of an STFS package. Data blocks are numbered without the hash tables interleaved with them: a level-0
+  // table before every 170 blocks, a level-1 table before every 170*170 and one level-2 table, each one block long
+  // (read-only packages, flag bit 0) or two. A file is a run of blocks (contiguous flag) or a chain through the
+  // level-0 hash entries.
+  static void StfsInventory(Func<long, long, byte[]> read, Action<string, long, List<(long, long)>> add) {
+    var head = read(0, 0x1000);
+    string magic = Encoding.ASCII.GetString(head, 0, 4);
+    if (magic != "LIVE" && magic != "PIRS" && magic != "CON ")
+      throw new InvalidDataException(L.T("Pacote Xbox 360 (STFS) não encontrado", "No Xbox 360 package (STFS) found"));
+    uint headerSize = U32Be(head, 0x340), volumeType = U32Be(head, 0x3A9);
+    if (head[0x379] != 0x24 || volumeType != 0)
+      throw new InvalidDataException(L.T("Pacote Xbox 360 sem volume STFS", "Xbox 360 package without an STFS volume"));
+    int shift = (head[0x37B] & 1) != 0 ? 0 : 1;
+    int tableBlocks = U16(head, 0x37C);
+    long tableStart = head[0x37E] | head[0x37F] << 8 | head[0x380] << 16;
+    long allocated = U32Be(head, 0x395);
+    long dataBase = (headerSize + 0xFFFL) & ~0xFFFL;
+    if (tableBlocks <= 0 || tableBlocks > 4096 || allocated > 0xFFFFFF)
+      throw new InvalidDataException(L.T("Tabela de arquivos STFS inválida", "Invalid STFS file table"));
+    long Offset(long block) {
+      if (block >= allocated) throw new InvalidDataException(L.T("Bloco STFS fora do pacote", "STFS block outside the package"));
+      long b = block + (((block / 170) + 1) << shift);
+      if (block >= 170) {
+        b += ((block / 28900) + 1) << shift;
+        if (block >= 28900) b += 1L << shift;
+      }
+      return dataBase + b * StfsBlock;
+    }
+    long Following(long block) {
+      if (shift != 0)
+        throw new InvalidDataException(L.T("Pacote STFS com duas tabelas de hash por nível: arquivo fragmentado não suportado",
+                                           "STFS package with two hash tables per level: fragmented files are not supported"));
+      var e = read(Offset(block / 170 * 170) - StfsBlock + block % 170 * 0x18, 0x18);
+      return e[0x15] << 16 | e[0x16] << 8 | e[0x17];
+    }
+    var table = new List<byte>();
+    long blk = tableStart;
+    for (int i = 0; i < tableBlocks; ++i) {
+      table.AddRange(read(Offset(blk), StfsBlock));
+      if (i + 1 < tableBlocks) blk = shift == 0 ? Following(blk) : blk + 1;
+    }
+    var t = table.ToArray();
+    var records = new SortedDictionary<int, (string Name, byte Flags, long Start, int Parent, long Length)>();
+    for (int i = 0; i < t.Length / 0x40; ++i) {
+      int o = i * 0x40;
+      int n = t[o + 0x28] & 0x3F;
+      if (n == 0) continue;
+      records[i] = (Encoding.ASCII.GetString(t, o, n), t[o + 0x28], t[o + 0x2F] | t[o + 0x30] << 8 | t[o + 0x31] << 16,
+                    (short)(t[o + 0x32] << 8 | t[o + 0x33]), U32Be(t, o + 0x34));
+    }
+    string Full(int i) {
+      var parts = new List<string>();
+      var seen = new HashSet<int>();
+      while (i != -1) {
+        if (!seen.Add(i) || !records.ContainsKey(i) || parts.Count > 64)
+          throw new InvalidDataException(L.T("Estrutura de diretórios inválida", "Invalid directory structure"));
+        parts.Add(records[i].Name);
+        i = records[i].Parent;
+      }
+      parts.Reverse();
+      return string.Join("/", parts);
+    }
+    foreach (var kv in records) {
+      var r = kv.Value;
+      SafePath(r.Name);
+      if ((r.Flags & 0x80) != 0) continue;
+      var extents = new List<(long, long)>();
+      long block = r.Start, left = r.Length;
+      for (long k = (r.Length + StfsBlock - 1) / StfsBlock; k > 0; --k) {
+        long o = Offset(block), n = Math.Min(StfsBlock, left);
+        if (extents.Count > 0 && extents[extents.Count - 1].Item1 + extents[extents.Count - 1].Item2 == o)
+          extents[extents.Count - 1] = (extents[extents.Count - 1].Item1, extents[extents.Count - 1].Item2 + n);
+        else extents.Add((o, n));
+        left -= n;
+        if (left > 0) block = (r.Flags & 0x40) != 0 ? block + 1 : Following(block);
+      }
+      add(Full(kv.Key), r.Length, extents);
+    }
   }
 
   // ------------------------------------------------------------------ .disc index (layout.py)
@@ -381,6 +517,8 @@ static class GameInstall {
     status(L.T("Lendo arquivos da origem…", "Reading the source files…"));
     string filesystem = config.TryGetValue("filesystem", out var fs) ? Convert.ToString(fs) : "iso9660";
     string output = Target(root, config.TryGetValue("destination", out var dv) && dv != null ? Convert.ToString(dv) : "game_files");
+    // An Xbox 360 package: the file, or the folder the console keeps it in (<title id>/<type>/<package>).
+    if (filesystem == "stfs") source = StfsPackage(source) ?? source;
     bool isIso = File.Exists(source);
     if (!isIso && !Directory.Exists(source)) throw new InvalidDataException(L.T("Selecione uma ISO ou pasta existente", "Choose an existing ISO or folder"));
     if (string.Equals(source, output, cmpPath) || (!isIso && (Inside(output, source) || Inside(source, output))))

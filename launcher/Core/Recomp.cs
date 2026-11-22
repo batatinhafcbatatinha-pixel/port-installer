@@ -153,7 +153,16 @@ sealed class Recomp {
     switch (console) {
       case "psp": label = PspTitle(disc, out name); identity = new[] { "UMD_DATA.BIN", "PSP_GAME/PARAM.SFO" }; fs = "iso9660"; what = "PSP"; break;
       case "xbox": label = XboxTitle(disc, out name); identity = new[] { "default.xbe" }; fs = "xdvdfs"; what = "Xbox"; break;
-      case "x360": label = X360Title(disc); identity = new[] { "default.xex" }; fs = "xdvdfs"; what = "Xbox 360"; break;
+      case "x360": {
+        // A disc (XDVDFS), or a package (Xbox Live Arcade, games on demand) that names its game itself.
+        label = X360Title(disc);
+        identity = new[] { "default.xex" };
+        string package = GameInstall.StfsPackage(disc);
+        fs = package != null ? "stfs" : "xdvdfs";
+        if (package != null) name = GameInstall.StfsTitle(package);
+        what = package != null ? "Xbox 360 Arcade" : "Xbox 360";
+        break;
+      }
       default: return null;
     }
     if (label == null) return null;
@@ -193,6 +202,8 @@ sealed class Recomp {
     size = 0;
     try {
       using (var sha = System.Security.Cryptography.SHA256.Create()) {
+        string package = GameInstall.StfsPackage(disc);
+        if (package != null) disc = package;
         if (Directory.Exists(disc)) {
           string f = Path.Combine(disc, rel.Replace('/', Path.DirectorySeparatorChar));
           if (!File.Exists(f)) return null;
@@ -200,7 +211,7 @@ sealed class Recomp {
         }
         using (var h = File.OpenRead(disc)) {
           List<GameInstall.Entry> entries = null;
-          foreach (string fs in new[] { "xdvdfs", "iso9660" }) {
+          foreach (string fs in package != null ? new[] { "stfs" } : new[] { "xdvdfs", "iso9660" }) {
             try { entries = GameInstall.Inventory(h, h.Length, fs); break; } catch (InvalidDataException) { }
           }
           var e = entries?.FirstOrDefault(x => string.Equals(x.Path, rel, StringComparison.OrdinalIgnoreCase));
@@ -477,8 +488,33 @@ sealed class Recomp {
   // Whether a disc image or extracted folder has the file, whatever its size.
   public static bool DiscHas(string disc, string rel) => ReadDiscFile(disc, rel, true) != null;
 
+  // One file of an Xbox 360 package (STFS), as ReadDiscFile returns it.
+  static byte[] PackageFile(string package, string rel, bool probe, int head) {
+    try {
+      using (var h = File.OpenRead(package)) {
+        var e = GameInstall.Inventory(h, h.Length, "stfs").FirstOrDefault(x => string.Equals(x.Path, rel, StringComparison.OrdinalIgnoreCase));
+        if (e == null) return null;
+        if (probe) return new byte[0];
+        long want = head > 0 ? Math.Min(e.Size, head) : e.Size;
+        if (want > (16 << 20)) return null;
+        var data = new byte[want];
+        long got = 0;
+        foreach (var (offset, length) in e.Extents) {
+          if (got >= want) break;
+          h.Seek(offset, SeekOrigin.Begin);
+          int n = (int)Math.Min(length, want - got), r = 0;
+          while (r < n) { int k = h.Read(data, (int)got + r, n - r); if (k <= 0) return null; r += k; }
+          got += n;
+        }
+        return data;
+      }
+    } catch (Exception) { return null; }
+  }
+
   // head > 0: only the first head bytes, whatever the file's size (an executable's header).
   public static byte[] ReadDiscFile(string disc, string rel, bool probe = false, int head = 0) {
+    string package = GameInstall.StfsPackage(disc);
+    if (package != null) return PackageFile(package, rel, probe, head);
     if (Directory.Exists(disc)) {
       string f = Path.Combine(disc, rel.Replace('/', Path.DirectorySeparatorChar));
       if (probe) return File.Exists(f) ? new byte[0] : null;

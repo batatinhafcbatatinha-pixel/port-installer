@@ -302,6 +302,65 @@ static class Tests {
     Check(!Directory.EnumerateFiles(root2, "*.part", SearchOption.AllDirectories).Any() && !File.Exists(Path.Combine(root2, ".game-install.lock")), "no partial files or lock left");
   }
 
+  // A read-only STFS package (one hash table per level): the file table in block 0, default.xex contiguous in blocks
+  // 1-2, media/a.bin chained through the hash table (block 4, then block 3). Block b is at 0xA000 + (b + 1) * 0x1000
+  // (the level-0 table sits at 0xA000).
+  static byte[] Stfs(out byte[] xex, out byte[] bin) {
+    var p = new byte[0x10000];
+    void Be(int o, uint v) { p[o] = (byte)(v >> 24); p[o + 1] = (byte)(v >> 16); p[o + 2] = (byte)(v >> 8); p[o + 3] = (byte)v; }
+    System.Text.Encoding.ASCII.GetBytes("LIVE").CopyTo(p, 0);
+    Be(0x340, 0xA000);
+    p[0x379] = 0x24; p[0x37B] = 1; p[0x37C] = 1;   // descriptor size, read-only, 1 file table block (at block 0)
+    Be(0x395, 5);
+    System.Text.Encoding.BigEndianUnicode.GetBytes("Test Arcade").CopyTo(p, 0x411);
+    int Block(int b) => 0xA000 + (b + 1) * 0x1000;
+    void Entry(int i, string name, byte flags, int start, int parent, uint size) {
+      int o = Block(0) + i * 0x40;
+      System.Text.Encoding.ASCII.GetBytes(name).CopyTo(p, o);
+      p[o + 0x28] = (byte)(name.Length | flags);
+      p[o + 0x2F] = (byte)start; p[o + 0x32] = (byte)(parent >> 8); p[o + 0x33] = (byte)parent;
+      Be(o + 0x34, size);
+    }
+    Entry(0, "media", 0x80, 0, 0xFFFF, 0);
+    Entry(1, "default.xex", 0x40, 1, 0xFFFF, 0x1800);
+    Entry(2, "a.bin", 0, 4, 0, 0x1100);
+    xex = new byte[0x1800]; bin = new byte[0x1100];
+    new Random(2).NextBytes(xex); new Random(3).NextBytes(bin);
+    System.Text.Encoding.ASCII.GetBytes("XEX2").CopyTo(xex, 0);
+    Array.Copy(xex, 0, p, Block(1), 0x1800);
+    Array.Copy(bin, 0, p, Block(4), 0x1000);
+    Array.Copy(bin, 0x1000, p, Block(3), 0x100);
+    p[0xA000 + 4 * 0x18 + 0x17] = 3;   // block 4 -> block 3
+    return p;
+  }
+
+  static void TestStfsPackage() {
+    string src = Temp(), root = Temp();
+    string dir = Path.Combine(src, "584100FF", "000D0000");
+    Directory.CreateDirectory(dir);
+    byte[] package = Stfs(out byte[] xex, out byte[] bin);
+    File.WriteAllBytes(Path.Combine(dir, "ABCDEF0123"), package);
+    string found = GameInstall.StfsPackage(src);
+    Equal(Path.Combine(dir, "ABCDEF0123"), found, "the package in the console's folder layout");
+    Equal("Test Arcade", GameInstall.StfsTitle(found), "the package's display name");
+    using (var s = File.OpenRead(found)) {
+      var entries = GameInstall.Inventory(s, s.Length, "stfs");
+      Equal(2, entries.Count, "files (the directory is not one)");
+      var x = entries.Single(e => e.Path == "default.xex");
+      Equal(1, x.Extents.Count, "a contiguous file is one extent");
+      var a = entries.Single(e => e.Path == "media/a.bin");
+      Equal(2, a.Extents.Count, "a chained file follows the hash table");
+    }
+    Equal(Sha(xex).ToLowerInvariant(), Recomp.DiscFileSha256(src, "default.xex", out long size).ToLowerInvariant(), "the identity file's hash");
+    Equal((long)xex.Length, size, "its size");
+    string json = Path.Combine(root, "installer.json");
+    File.WriteAllText(json, "{\"schema\": 1, \"name\": \"T\", \"filesystem\": \"stfs\", \"destination\": \"game_files\", " +
+                            "\"required_files\": {\"default.xex\": \"" + Sha(xex) + "\"}, \"required_paths\": []}");
+    GameInstall.Install(src, root, json, _ => { }, (d, t) => { }, System.Threading.CancellationToken.None);
+    Check(File.ReadAllBytes(Path.Combine(root, "game_files", "media", "a.bin")).SequenceEqual(bin), "chained file extracted");
+    Check(GameInstall.GameOk(root, json), "game files in place");
+  }
+
   // A PARAM.SFO with one TITLE entry.
   static byte[] Sfo(string title) {
     byte[] key = System.Text.Encoding.ASCII.GetBytes("TITLE\0\0\0"), value = new byte[128];
