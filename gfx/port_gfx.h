@@ -65,6 +65,8 @@ int port_gfx_scaler(void);
 /* Shows one frame of B8G8R8A8 pixels (the guest's A8R8G8B8 in memory order), pitch in bytes. Returns 1 when it was
  * presented with vsync pacing (the caller need not sleep), 0 otherwise. The pixels are copied before it returns. */
 int port_gfx_present_pixels(const void *pixels, uint32_t width, uint32_t height, uint32_t pitch);
+/* The same for R8G8B8A8 pixels (OpenGL-style byte order). */
+int port_gfx_present_pixels_rgba(const void *pixels, uint32_t width, uint32_t height, uint32_t pitch);
 
 /* For a runtime rendering with Vulkan itself: the instance, physical device, device, graphics queue and its family
  * port_gfx made (VkInstance, VkPhysicalDevice, VkDevice, VkQueue as void*). NULL before port_gfx_open. Submissions to

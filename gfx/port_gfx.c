@@ -27,6 +27,7 @@
 #include <vulkan/vulkan.h>
 
 #include "port_gfx_shaders.h"
+#include "port_ngx.h"
 
 #define FRAMES 2          /* frames in flight */
 #define MAX_IMAGES 8      /* swapchain images */
@@ -157,39 +158,6 @@ typedef struct NgxResource {
     int type;              /* 0: image view */
     unsigned char read_write;
 } NgxResource;
-typedef struct NgxPathList { const wchar_t *const *paths; unsigned int count; } NgxPathList;
-typedef struct NgxLogging { void *callback; int minimum_level; unsigned char disable_other_sinks; } NgxLogging;
-typedef struct NgxFeatureInfo { NgxPathList paths; void *internal; NgxLogging logging; } NgxFeatureInfo;
-
-/* NVSDK_NGX_Parameter is a C++ interface built with MSVC: overloads of one name share a slot group, in reverse
- * declaration order. Its methods are reached through that vtable. */
-enum {
-    NGX_SET_VOIDP = 0, NGX_SET_D3D12, NGX_SET_D3D11, NGX_SET_I, NGX_SET_UI, NGX_SET_D, NGX_SET_F, NGX_SET_ULL,
-    NGX_GET_VOIDP, NGX_GET_D3D12, NGX_GET_D3D11, NGX_GET_I, NGX_GET_UI, NGX_GET_D, NGX_GET_F, NGX_GET_ULL, NGX_RESET
-};
-typedef struct NgxParameter { void **vtable; } NgxParameter;
-typedef void (*NgxSetUI)(NgxParameter *, const char *, unsigned int);
-typedef void (*NgxSetI)(NgxParameter *, const char *, int);
-typedef void (*NgxSetF)(NgxParameter *, const char *, float);
-typedef void (*NgxSetP)(NgxParameter *, const char *, void *);
-typedef int (*NgxGetI)(const NgxParameter *, const char *, int *);
-
-static void ngx_ui(NgxParameter *p, const char *k, unsigned int v) { ((NgxSetUI)p->vtable[NGX_SET_UI])(p, k, v); }
-static void ngx_i(NgxParameter *p, const char *k, int v) { ((NgxSetI)p->vtable[NGX_SET_I])(p, k, v); }
-static void ngx_f(NgxParameter *p, const char *k, float v) { ((NgxSetF)p->vtable[NGX_SET_F])(p, k, v); }
-static void ngx_p(NgxParameter *p, const char *k, void *v) { ((NgxSetP)p->vtable[NGX_SET_VOIDP])(p, k, v); }
-static int ngx_get_i(const NgxParameter *p, const char *k, int def)
-{
-    int v = def;
-    return (((NgxGetI)p->vtable[NGX_GET_I])(p, k, &v) & 0xFFF00000u) == 0xBAD00000u ? def : v;
-}
-
-#define NGX_OK(r) ((((unsigned)(r)) & 0xFFF00000u) != 0xBAD00000u)
-#define NGX_VERSION_API 0x14
-#define NGX_FEATURE_SUPER_SAMPLING 1
-#define NGX_FLAG_MV_LOW_RES 2
-#define NGX_FLAG_AUTO_EXPOSURE 64
-
 typedef unsigned (*PfnNgxInit)(unsigned long long, const wchar_t *, VkInstance, VkPhysicalDevice, VkDevice,
                                PFN_vkGetInstanceProcAddr, PFN_vkGetDeviceProcAddr, const NgxFeatureInfo *, int);
 typedef unsigned (*PfnNgxParams)(NgxParameter **);
@@ -225,28 +193,6 @@ static const char *const kNgxDeviceExtensions[] = {
     "VK_NVX_binary_import", "VK_NVX_image_view_handle", "VK_KHR_push_descriptor",
 };
 
-#if defined(_WIN32)
-static void *ngx_load(void)
-{
-    /* The driver records where its NGX core lives. */
-    wchar_t dir[MAX_PATH] = L"", path[MAX_PATH + 32];
-    DWORD size = sizeof dir;
-    HMODULE m = NULL;
-    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\NVIDIA Corporation\\Global\\NGXCore", L"FullPath",
-                     RRF_RT_REG_SZ, NULL, dir, &size) == ERROR_SUCCESS && dir[0]) {
-        _snwprintf(path, MAX_PATH + 31, L"%ls\\_nvngx.dll", dir);
-        path[MAX_PATH + 31] = 0;
-        m = LoadLibraryW(path);
-    }
-    if (!m)
-        m = LoadLibraryW(L"_nvngx.dll");
-    return m;
-}
-#define NGX_SYM(lib, name) ((void *)GetProcAddress((HMODULE)(lib), name))
-#else
-static void *ngx_load(void) { return NULL; }
-#define NGX_SYM(lib, name) NULL
-#endif
 
 static int ngx_start(void)
 {
@@ -489,7 +435,7 @@ static int create_instance(void)
 static int adapter_luid(int index, uint8_t luid[8])
 {
 #if defined(_WIN32)
-    typedef HRESULT(WINAPI * PfnFactory)(REFIID, void **);
+    typedef HRESULT(WINAPI * PfnFactory)(const GUID *, void **);   /* REFIID, the same in C and C++ */
     static const GUID iid_factory1 = {0x770aae78, 0xf26f, 0x4dba, {0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87}};
     HMODULE dxgi = LoadLibraryA("dxgi.dll");
     PfnFactory create = dxgi ? (PfnFactory)(void *)GetProcAddress(dxgi, "CreateDXGIFactory1") : NULL;
@@ -1242,7 +1188,7 @@ static int begin(uint32_t *index)
     return f;
 }
 
-int port_gfx_present_pixels(const void *pixels, uint32_t width, uint32_t height, uint32_t pitch)
+static int present_pixels(const void *pixels, uint32_t width, uint32_t height, uint32_t pitch, VkFormat format)
 {
     uint32_t index;
     int f;
@@ -1277,9 +1223,9 @@ int port_gfx_present_pixels(const void *pixels, uint32_t width, uint32_t height,
     for (uint32_t y = 0; y < height; ++y)
         memcpy((uint8_t *)g.frame[f].staging_map + (size_t)y * width * 4, (const uint8_t *)pixels + (size_t)y * pitch,
                (size_t)width * 4);
-    if (!g.source.image || g.source.width != width || g.source.height != height) {
+    if (!g.source.image || g.source.width != width || g.source.height != height || g.source.format != format) {
         vkDeviceWaitIdle_(g.device);
-        if (!create_image(&g.source, VK_FORMAT_B8G8R8A8_UNORM, width, height,
+        if (!create_image(&g.source, format, width, height,
                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
             vkEndCommandBuffer_(cmd);
             return 0;
@@ -1298,6 +1244,16 @@ int port_gfx_present_pixels(const void *pixels, uint32_t width, uint32_t height,
             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
     return finish(cmd, index, g.source.image, g.source.view, g.source.format, width, height, VK_NULL_HANDLE);
+}
+
+int port_gfx_present_pixels(const void *pixels, uint32_t width, uint32_t height, uint32_t pitch)
+{
+    return present_pixels(pixels, width, height, pitch, VK_FORMAT_B8G8R8A8_UNORM);
+}
+
+int port_gfx_present_pixels_rgba(const void *pixels, uint32_t width, uint32_t height, uint32_t pitch)
+{
+    return present_pixels(pixels, width, height, pitch, VK_FORMAT_R8G8B8A8_UNORM);
 }
 
 int port_gfx_present_image(uint64_t image, uint64_t view, uint32_t format, uint32_t width, uint32_t height,
