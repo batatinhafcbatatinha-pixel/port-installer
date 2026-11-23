@@ -190,15 +190,26 @@ static float shape_trigger(float t)
 #if defined(_WIN32)
 /* ---------------------------------------------------------------- SDL */
 
+static void *(*g_sdl_resolver)(const char *name);
+
+void port_input_set_sdl_resolver(void *(*resolve)(const char *name))
+{
+    g_sdl_resolver = resolve;
+}
+
 static int load_sdl(const char *dir)
 {
     char path[MAX_PATH];
+    HMODULE lib = NULL;
     snprintf(path, sizeof path, "%s%sSDL3.dll", dir ? dir : "", dir && *dir ? "\\" : "");
-    HMODULE lib = LoadLibraryExA(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-    if (!lib)
+    if (!g_sdl_resolver && !(lib = LoadLibraryExA(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH)))
         return 0;
     int ok = 1;
-#define BIND(field, name) do { *(FARPROC *)&sdl.field = GetProcAddress(lib, name); ok = ok && sdl.field; } while (0)
+    /* The host's own SDL3 (port_input_set_sdl_resolver), or SDL3.dll next to the game. */
+#define BIND(field, name) do { \
+        *(void **)&sdl.field = g_sdl_resolver ? g_sdl_resolver(name) : (void *)GetProcAddress(lib, name); \
+        ok = ok && sdl.field; \
+    } while (0)
     BIND(Init, "SDL_Init"); BIND(SetHint, "SDL_SetHint"); BIND(AddMappingsFromFile, "SDL_AddGamepadMappingsFromFile");
     BIND(AddMapping, "SDL_AddGamepadMapping"); BIND(UpdateGamepads, "SDL_UpdateGamepads");
     BIND(UpdateJoysticks, "SDL_UpdateJoysticks"); BIND(FlushEvents, "SDL_FlushEvents");

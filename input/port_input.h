@@ -71,6 +71,10 @@ typedef struct PortInputSettings {
 
 /* Once, before anything else: exe_dir holds SDL3.dll and gamecontrollerdb.txt; game_dir the game's input.ini
  * (NULL: the PORT_INPUT_GAME_DIR environment variable, when set). 1 when SDL3 runs. */
+/* For a host that already links SDL3 (call before port_input_start): resolve(name) returns that SDL's function of
+ * the given name ("SDL_Init", ...), used instead of loading SDL3.dll. Windows. */
+void port_input_set_sdl_resolver(void *(*resolve)(const char *name));
+
 int port_input_start(const char *exe_dir, const char *game_dir);
 /* Once per frame, on the thread that reads the pads. */
 void port_input_update(void);
