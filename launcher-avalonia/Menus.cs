@@ -54,6 +54,7 @@ sealed class Menus {
   List<MenuSpec> SettingsMenu() => new List<MenuSpec> {
     new MenuSpec(L.T("Configurações do PC...", "PC settings..."), w.ShowSettings) { Gesture = G(Key.P) },
     new MenuSpec(L.T("Dependências...", "Dependencies..."), w.ShowDeps) { Gesture = G(Key.D) },
+    new MenuSpec(L.T("Controles...", "Controllers..."), w.ShowControllers) { Gesture = G(Key.J) },
     MenuSpec.Separator,
     new MenuSpec(L.T("Idioma (Language)", "Language (Idioma)"), null) { Items = () => new List<MenuSpec> {
       new MenuSpec(L.T("Igual ao sistema", "Same as the system"), () => w.SetLanguage("system")) { Check = L.Mode == "system" },

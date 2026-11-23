@@ -53,11 +53,26 @@ static class InputSettings {
   public static void Put(string key, int value, string gameDir) => Put(key, value.ToString(CultureInfo.InvariantCulture), gameDir);
 }
 
-// SDL3 for the Controllers page. Windows only (the games read controllers through it on every system, but the
-// launcher lists them only on Windows for now).
+// SDL3 for the Controllers page. Windows: the pinned SDL3.dll, fetched once. Linux and macOS: the system's SDL3
+// (libsdl3 / sdl3 package), as the games use there.
 static class Sdl {
   [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr LoadLibraryW(string path);
   [DllImport("kernel32", CharSet = CharSet.Ansi)] static extern IntPtr GetProcAddress(IntPtr module, string name);
+
+  static IntPtr Open(string path) {
+#if NETFRAMEWORK
+    return LoadLibraryW(path);
+#else
+    return System.Runtime.InteropServices.NativeLibrary.TryLoad(path, out IntPtr h) ? h : IntPtr.Zero;
+#endif
+  }
+  static IntPtr Symbol(IntPtr lib, string name) {
+#if NETFRAMEWORK
+    return GetProcAddress(lib, name);
+#else
+    return System.Runtime.InteropServices.NativeLibrary.TryGetExport(lib, name, out IntPtr p) ? p : IntPtr.Zero;
+#endif
+  }
 
   [StructLayout(LayoutKind.Sequential)] struct Guid16 { public long A, B; }
   [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate byte InitFn(uint flags);
@@ -111,19 +126,23 @@ static class Sdl {
   // Fetches SDL3.dll and the database once (a few MB). False with Error set when it cannot.
   public static bool Start() {
     if (ready) return true;
-    if (!OS.Windows) { Error = L.T("A lista de controles está disponível no Windows.", "The controller list is available on Windows."); return false; }
     try {
       Directory.CreateDirectory(Dir);
       string dll = Path.Combine(Dir, "SDL3.dll"), db = Path.Combine(Dir, "gamecontrollerdb.txt");
-      if (!File.Exists(dll)) {
+      if (OS.Windows && !File.Exists(dll)) {
         using (var zip = new ZipArchive(new MemoryStream(Download(SdlZip, SdlZipSha))))
           zip.Entries.First(e => e.Name == "SDL3.dll").ExtractToFile(dll, true);
       }
       if (!File.Exists(db)) File.WriteAllBytes(db, Download(Db, DbSha));
-      IntPtr lib = LoadLibraryW(dll);
-      if (lib == IntPtr.Zero) { Error = "SDL3.dll"; return false; }
+      IntPtr lib = IntPtr.Zero;
+      foreach (string name in OS.Windows ? new[] { dll } : new[] { "libSDL3.so.0", "libSDL3.so", "libSDL3.0.dylib", "libSDL3.dylib" })
+        if ((lib = Open(name)) != IntPtr.Zero) break;
+      if (lib == IntPtr.Zero) {
+        Error = OS.Windows ? "SDL3.dll" : L.T("SDL3 não encontrado; instale o pacote libsdl3 (ou sdl3).", "SDL3 not found; install the libsdl3 (or sdl3) package.");
+        return false;
+      }
       T Bind<T>(string name) where T : class {
-        IntPtr p = GetProcAddress(lib, name);
+        IntPtr p = Symbol(lib, name);
         if (p == IntPtr.Zero) throw new MissingMethodException(name);
         return Marshal.GetDelegateForFunctionPointer(p, typeof(T)) as T;
       }
@@ -272,7 +291,7 @@ sealed class Remap {
 
   public string ToMapping(Controller c) =>
       c.Guid + "," + c.Name + "," + string.Join(",", Targets.Where(t => Fields.ContainsKey(t)).Select(t => t + ":" + Fields[t])) +
-      ",platform:Windows,";
+      ",platform:" + (OS.Windows ? "Windows" : RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Mac OS X" : "Linux") + ",";
 }
 
 }

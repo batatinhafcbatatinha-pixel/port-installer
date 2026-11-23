@@ -177,12 +177,14 @@ sealed partial class MainWindow : Window {
     tbSettings.Click += (s, e) => ShowSettings();
     tbDeps = new ToolButton(Glyph.Box, L.T("Dependências", "Dependencies"), 92);
     tbDeps.Click += (s, e) => ShowDeps();
+    var tbPads = new ToolButton(Glyph.Gear, L.T("Controles", "Controllers"), 84);
+    tbPads.Click += (s, e) => ShowControllers();
     tbRecomps = new ToolButton(Glyph.Update, L.T("Recompiladores", "Recompilers"), 104);
     tbRecomps.Click += (s, e) => ShowRecomps();
     var tbLog = new ToolButton(Glyph.Log, "Log");
     tbLog.Click += (s, e) => SetLogVisible(!logPanel.IsVisible);
     var left = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, ClipToBounds = true };
-    foreach (var c in new Control[] { tbOpen, tbFolders, tbRefresh, new ToolSeparator(), tbPlay, tbStop, tbInstall, new ToolSeparator(), tbSettings, tbDeps, tbRecomps, tbLog })
+    foreach (var c in new Control[] { tbOpen, tbFolders, tbRefresh, new ToolSeparator(), tbPlay, tbStop, tbInstall, new ToolSeparator(), tbSettings, tbDeps, tbPads, tbRecomps, tbLog })
       left.Children.Add(c);
     if (!Lib) tbFolders.IsVisible = tbRefresh.IsVisible = tbRecomps.IsVisible = false;
     viewSwitch = new ViewSwitch { Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
