@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace PortLauncher {
 
@@ -470,7 +471,9 @@ static class Tests {
     r.Set("a", new RawInput { Source = "b5" });
     r.Set("leftx", new RawInput { Source = "-a3" });
     r.Set("righttrigger", new RawInput { Source = "a5" });
-    Equal("03000000de280000ff11000000000000,Pad,a:b5,b:b1,righttrigger:a5,dpup:h0.1,leftx:a3,platform:Windows,", r.ToMapping(c), "mapping");
+    // SDL reads a mapping only when its platform is the running one, so the written name follows the system.
+    string platform = OS.Windows ? "Windows" : RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "Mac OS X" : "Linux";
+    Equal("03000000de280000ff11000000000000,Pad,a:b5,b:b1,righttrigger:a5,dpup:h0.1,leftx:a3,platform:" + platform + ",", r.ToMapping(c), "mapping");
   }
 
   static void TestSdlLists() {
