@@ -11,7 +11,7 @@ using System.Threading;
 namespace PortLauncher {
 
 static class Consoles {
-  public static readonly string[] Order = { "ps2", "xbox", "x360", "psp", "ps5" };
+  public static readonly string[] Order = { "ps2", "xbox", "x360", "psp", "ps5", "xseries" };
 
   public static string Name(string id) {
     switch (id) {
@@ -20,6 +20,7 @@ static class Consoles {
       case "x360": return "Xbox 360";
       case "psp": return "PSP";
       case "ps5": return "PlayStation 5";
+      case "xseries": return "Xbox One / Series";
       default: return id ?? "?";
     }
   }
@@ -29,6 +30,7 @@ static class Consoles {
       case "ps2": return "PS2";
       case "x360": return "Xbox 360";
       case "ps5": return "PS5";
+      case "xseries": return "Xbox One/Series";
       default: return Name(id);
     }
   }
@@ -40,6 +42,8 @@ static class Consoles {
     if (label != null) return "ps2";
     label = Recomp.Ps5Title(path, out _);
     if (label != null) return "ps5";
+    label = Recomp.XsTitle(path, out _);
+    if (label != null) return "xseries";
     try {
       byte[] umd = Recomp.ReadDiscFile(path, "UMD_DATA.BIN");
       if (umd != null) { label = Encoding.ASCII.GetString(umd).Split('|')[0].Trim('\0', ' '); return "psp"; }
@@ -220,7 +224,8 @@ static class DiscScanner {
   public static bool IsExtractedDisc(string dir) =>
       File.Exists(Path.Combine(dir, "SYSTEM.CNF")) || Directory.Exists(Path.Combine(dir, "PSP_GAME")) ||
       File.Exists(Path.Combine(dir, "default.xbe")) || File.Exists(Path.Combine(dir, "default.xex")) ||
-      (File.Exists(Path.Combine(dir, "eboot.bin")) && File.Exists(Path.Combine(dir, "sce_sys", "param.json")));   // PS5 dump
+      (File.Exists(Path.Combine(dir, "eboot.bin")) && File.Exists(Path.Combine(dir, "sce_sys", "param.json"))) ||   // PS5 dump
+      File.Exists(Path.Combine(dir, "MicrosoftGame.config"));   // Xbox One / Series dump
 
   static string CacheFile => Path.Combine(Prefs.Cache, "scan-all.tsv");
 

@@ -49,6 +49,22 @@ sealed class Recomp {
     } catch (Exception) { return null; }
   }
 
+  // An Xbox One / Series dump folder (MicrosoftGame.config at its top): its title id (eight hex digits) and name,
+  // else null. A config without a title id gets one from its own contents, so the same dump is always the same game.
+  public static string XsTitle(string path, out string name) {
+    name = null;
+    if (!Directory.Exists(path)) return null;
+    byte[] config = ReadDiscFile(path, "MicrosoftGame.config");
+    if (config == null) return null;
+    string text = Encoding.UTF8.GetString(config).TrimStart('\uFEFF');
+    if (text.IndexOf("<Game", StringComparison.OrdinalIgnoreCase) < 0) return null;
+    var m = Regex.Match(text, @"<ShellVisuals\b[^>]*\bDefaultDisplayName\s*=\s*""([^""]*)""", RegexOptions.IgnoreCase);
+    if (m.Success && !m.Groups[1].Value.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase))
+      name = WebUtility.HtmlDecode(m.Groups[1].Value).Trim();
+    m = Regex.Match(text, @"<TitleId>\s*([0-9A-Fa-f]{8})\s*</TitleId>", RegexOptions.IgnoreCase);
+    return m.Success ? m.Groups[1].Value.ToUpperInvariant() : Sha256(config).Substring(0, 8).ToUpperInvariant();
+  }
+
   // A PSP disc: its id (UMD_DATA.BIN: ULUS-12345) and name (PARAM.SFO TITLE), else null.
   public static string PspTitle(string disc, out string name) {
     name = SfoTitle(ReadDiscFile(disc, "PSP_GAME/PARAM.SFO"));
@@ -113,6 +129,8 @@ sealed class Recomp {
     if (Generic == null || boot == null) return null;
     string ps5 = Ps5Title(disc, out string ps5Name);
     if (ps5 != null) return CreatePs5Port(disc, ps5, ps5Name);
+    string xs = XsTitle(disc, out string xsName);
+    if (xs != null) return CreateLinkedPort(disc, xs, xsName, "Xbox One / Series (" + xs + ")", "MicrosoftGame.config");
     if (BootExecutable(disc) == null) return CreateDiscPort(disc);
     byte[] cnf = ReadDiscFile(disc, "SYSTEM.CNF"), elf = ReadDiscFile(disc, boot);
     if (cnf == null || elf == null) return null;
@@ -236,20 +254,25 @@ sealed class Recomp {
 
   // A PS5 dump: the game stays where it is (installer.json "mode": "link" makes game_files a junction to it);
   // the dump is recognised again by the SHA-256 of its sce_sys/param.json.
-  string CreatePs5Port(string disc, string titleId, string titleName) {
-    byte[] param = ReadDiscFile(disc, "sce_sys/param.json");
+  string CreatePs5Port(string disc, string titleId, string titleName) =>
+      CreateLinkedPort(disc, titleId, titleName, "PlayStation 5 (" + titleId + ")", "sce_sys/param.json");
+
+  // A dump that is used where it is: keyFile (a small file of the dump) is how it is recognised again.
+  string CreateLinkedPort(string disc, string titleId, string titleName, string discName, string keyFile) {
+    byte[] param = ReadDiscFile(disc, keyFile);
+    if (param == null) return null;
     string dir = Path.Combine(PortsDir, titleId);
     Directory.CreateDirectory(dir);
     string title = string.IsNullOrEmpty(titleName) ? new DirectoryInfo(disc).Name : titleName;
     var setup = new Dictionary<string, object>(Generic);
     setup.Remove("play_cmd");
     setup["game"] = title;
-    setup["disc"] = "PlayStation 5 (" + titleId + ")";
+    setup["disc"] = discName;
         File.WriteAllText(Path.Combine(dir, "setup.json"), PortLauncher.Json.Write(setup));
     var installer = new Dictionary<string, object> {
       ["schema"] = 1, ["name"] = title, ["revision"] = titleId, ["filesystem"] = "folder", ["mode"] = "link", ["destination"] = "game_files",
-      ["required_files"] = new Dictionary<string, object> { ["sce_sys/param.json"] = Sha256(param).ToLowerInvariant() },
-      ["expected_files"] = new Dictionary<string, object> { ["sce_sys/param.json"] = param.LongLength },
+      ["required_files"] = new Dictionary<string, object> { [keyFile] = Sha256(param).ToLowerInvariant() },
+      ["expected_files"] = new Dictionary<string, object> { [keyFile] = param.LongLength },
       ["required_paths"] = new object[0],
     };
     File.WriteAllText(Path.Combine(dir, "installer.json"), PortLauncher.Json.Write(installer));
@@ -405,6 +428,7 @@ sealed class Recomp {
     label = BootExecutable(path);
     if (label != null) return GameForDisc(label);
     label = Ps5Title(path, out _);   // PS5 dump: matched below by the SHA-256 of sce_sys/param.json
+    label = label ?? XsTitle(path, out _);   // Xbox One / Series dump: by the SHA-256 of MicrosoftGame.config
     try {
       byte[] umd = ReadDiscFile(path, "UMD_DATA.BIN");
       if (umd != null) label = Encoding.ASCII.GetString(umd).Split('|')[0].Trim('\0', ' ');

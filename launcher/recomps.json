@@ -49,5 +49,16 @@
     "folder": "AnyPS5",
     "pt": "Jogos de PlayStation 5 convertidos para programas do Windows (sem emulação) a partir do seu dump decriptado.",
     "en": "PlayStation 5 games converted into Windows programs (no emulation) from your decrypted dump."
+  },
+  {
+    "id": "xseriesrecomp",
+    "console": "xseries",
+    "name": "xseriesrecomp (Xbox One / Series)",
+    "repo": "batatinhafcbatatinha-pixel/xseriesrecomp",
+    "branch": "main",
+    "folder": "xseriesrecomp",
+    "platforms": ["windows"],
+    "pt": "Jogos de Xbox One e Xbox Series no Windows a partir do seu dump: o código do jogo já é x86-64 e o runtime fornece as bibliotecas do console. Repositório ainda privado: aponte para uma pasta local.",
+    "en": "Xbox One and Xbox Series games on Windows from your dump: the game code is already x86-64 and the runtime supplies the console libraries. The repository is still private: point to a local folder."
   }
 ]
