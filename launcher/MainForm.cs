@@ -905,7 +905,7 @@ sealed partial class MainForm : Form {
     if (Busy) return;
     if (!Lib) { Install(path); return; }
     string console = Consoles.Identify(path, out _);
-    if (console == null) { Dialog.Info(this, Text, L.T("Não reconheci este disco (PS2, Xbox, Xbox 360, PSP ou dump de PS5). Imagens .iso precisam ter setores de 2048 bytes.", "This disc was not recognised (PS2, Xbox, Xbox 360, PSP or a PS5 dump). .iso images need 2048-byte sectors.")); return; }
+    if (console == null) { Dialog.Info(this, Text, L.T("Não reconheci este disco (PS2, Xbox, Xbox 360, PSP, dump de PS5 ou de Xbox One/Series). Imagens .iso precisam ter setores de 2048 bytes.", "This disc was not recognised (PS2, Xbox, Xbox 360, PSP or a PS5 dump). .iso images need 2048-byte sectors.")); return; }
     recomp = registry.RecompForConsole(console);
     if (recomp == null) {
       var k = registry.ForConsole(console);
@@ -934,11 +934,18 @@ sealed partial class MainForm : Form {
     if (Busy || recomp == null || path == null) return;
     if (boot == null) recomp.Detect(path, out boot);
     if (boot == null) { Dialog.Info(this, Text, L.T("Não foi possível ler este disco.", "This disc could not be read.")); return; }
-    bool ps5 = Recomp.Ps5Title(path, out _) != null;
+    bool xs = Recomp.XsTitle(path, out _) != null;
+    bool ps5 = xs || Recomp.Ps5Title(path, out _) != null;
     if (ps5 ? !Dialog.Ask(this, Text, L.T(
-            $"Este jogo ({boot}) ainda não foi convertido.\n\nO {recomp.Name} converte o executável do seu dump para um programa do Windows " +
+            xs
+            ? $"Este jogo ({boot}) ainda não foi preparado.\n\nO {recomp.Name} monta o seu runtime (na primeira vez demora) e liga os arquivos do jogo " +
+              "no lugar, sem copiar nem alterar o dump. Jogos ainda podem não funcionar ou parar em algum ponto.\n\nPreparar?"
+            : $"Este jogo ({boot}) ainda não foi convertido.\n\nO {recomp.Name} converte o executável do seu dump para um programa do Windows " +
             "(sem emulação) e liga os arquivos do jogo no lugar, sem copiar. Leva poucos minutos. Jogos ainda podem não funcionar ou parar em algum ponto.\n\nConverter?",
-            $"This game ({boot}) has not been converted yet.\n\n{recomp.Name} converts your dump's executable into a Windows program " +
+            xs
+            ? $"This game ({boot}) has not been prepared yet.\n\n{recomp.Name} builds its runtime (the first time takes a while) and links the game files " +
+              "in place, without copying or changing the dump. Games may still not work or may stop somewhere.\n\nPrepare it?"
+            : $"This game ({boot}) has not been converted yet.\n\n{recomp.Name} converts your dump's executable into a Windows program " +
             "(no emulation) and links the game files in place, without copying. It takes a few minutes. Games may still not work or may stop somewhere.\n\nConvert it?"),
             L.T("Converter", "Convert"), L.T("Cancelar", "Cancel"))
         : !Dialog.Ask(this, Text, Texts.GenericAsk(recomp.Name, boot, Recomp.BootExecutable(path) != null),

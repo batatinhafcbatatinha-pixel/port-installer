@@ -204,6 +204,52 @@ static class Tests {
     Equal(OS.Windows, known.Supported, "recomps.json platforms");
   }
 
+  // An Xbox One / Series dump is a folder with MicrosoftGame.config: recognised, and made into a linked port.
+  static void TestXboxSeriesDump() {
+    string dump = Temp();
+    File.WriteAllText(Path.Combine(dump, "MicrosoftGame.config"),
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Game configVersion=\"1\">\n  <Identity Name=\"TestGame\" Publisher=\"CN=Test\" Version=\"1.0.0.0\"/>\n" +
+        "  <ExecutableList><Executable Name=\"game.exe\" TargetDeviceFamily=\"Scarlett\" Id=\"Game\"/></ExecutableList>\n" +
+        "  <TitleId>1a2B3c4D</TitleId>\n  <ShellVisuals DefaultDisplayName=\"Test &amp; Game\" PublisherDisplayName=\"Test\"/>\n</Game>\n");
+    Equal("xseries", Consoles.Identify(dump, out string label), "console of a dump with MicrosoftGame.config");
+    Equal("1A2B3C4D", label, "title id");
+    Equal("1A2B3C4D", Recomp.XsTitle(dump, out string name), "title id again");
+    Equal("Test & Game", name, "display name");
+    Check(DiscScanner.IsExtractedDisc(dump), "the scan sees the dump folder");
+
+    string bare = Temp();
+    File.WriteAllText(Path.Combine(bare, "MicrosoftGame.config"), "<Game configVersion=\"1\"><ShellVisuals DefaultDisplayName=\"ms-resource:Name\"/></Game>");
+    string id = Recomp.XsTitle(bare, out name);
+    Check(id != null && id.Length == 8 && id == Recomp.XsTitle(bare, out _), "a config without a title id still gets a stable one");
+    Check(name == null, "a resource reference is not a name");
+    Check(Recomp.XsTitle(Temp(), out _) == null, "an empty folder is not a dump");
+
+    string root = Temp();
+    File.WriteAllText(Path.Combine(root, "launcher.json"),
+        "{\"recomp\": \"xs\", \"repo\": \"a/xseriesrecomp\", \"games_dir\": \"games\", \"exe\": \"build/run/plan.json\", \"generic_label\": \"^[0-9A-Fa-f]{8}$\"," +
+        " \"generic\": {\"play\": \"Play.cmd\", \"exe\": \"build/run/plan.json\", \"link_game\": true, \"play_cmd\": \"@echo off\\r\\n\", \"play_sh\": \"#!/usr/bin/env bash\\n\"," +
+        " \"steps\": [{\"run\": [\"{python}\", \"x.py\"]}]}}");
+    var r = Recomp.Load(root);
+    Equal("1A2B3C4D", r.CreateGenericPort(dump, label), "port id");
+    string port = Path.Combine(r.PortsDir, "1A2B3C4D");
+    var setup = Json.Object(File.ReadAllText(Path.Combine(port, "setup.json")));
+    Equal("Test & Game", Convert.ToString(setup["game"]), "setup.json game");
+    Equal("Xbox One / Series (1A2B3C4D)", Convert.ToString(setup["disc"]), "setup.json disc");
+    var inst = Json.Object(File.ReadAllText(Path.Combine(port, "installer.json")));
+    Equal("link", Convert.ToString(inst["mode"]), "the dump is linked, not copied");
+    Check(((IDictionary<string, object>)inst["required_files"]).ContainsKey("MicrosoftGame.config"), "recognised by its config");
+    Check(File.Exists(Path.Combine(port, OS.ScriptName("Play.cmd"))), "play script");
+    Check(File.ReadAllText(Path.Combine(port, OS.ScriptName("Play.cmd"))).StartsWith(OS.Windows ? "@echo off" : "#!/usr/bin/env bash"),
+        "the play script is this system's (play_cmd on Windows, play_sh elsewhere)");
+    Check(!File.ReadAllText(Path.Combine(port, "setup.json")).Contains("play_sh"), "the script templates stay out of setup.json");
+    r = Recomp.Load(root);
+    var again = r.Detect(dump, out string l2);
+    Check(again != null && again.Id == "1A2B3C4D", "the same dump is the same game the next time");
+    Equal("1A2B3C4D", l2, "label on detection");
+    var known = KnownRecomp.List().First(k => k.Id == "xseriesrecomp");
+    Equal("xseries", known.Console, "recomps.json console");
+  }
+
   static void TestSetupCommandLine() {
     var r = Recomp.Load(FakeRecomp());
     var c = r.ConfigFor(r.Games.First(g => g.Id == "py"));

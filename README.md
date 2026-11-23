@@ -21,8 +21,9 @@ Nothing from any game is in this repository or in its releases: the game always 
    - Developers: `git clone --recurse-submodules` a recompiler and run `Launcher.cmd`.
 2. The library starts empty. Click **ADD A GAME FOLDER** and pick one or more folders with your discs (`.iso` images or
    extracted discs; subfolders are searched too). Each disc's console is recognised (PS2 `SYSTEM.CNF`, PSP `UMD_DATA.BIN`,
-   Xbox `default.xbe`, Xbox 360 `default.xex`, PS5 dump `sce_sys/param.json`) and then its game (PS2 boot file; others:
-   SHA-256 of the small files in the game's `installer.json`). Games are split in tabs: **All**, PS2, Xbox, Xbox 360, PSP, PS5.
+   Xbox `default.xbe`, Xbox 360 `default.xex`, PS5 dump `sce_sys/param.json`, Xbox One / Series dump
+   `MicrosoftGame.config`) and then its game (PS2 boot file; others:
+   SHA-256 of the small files in the game's `installer.json`). Games are split in tabs: **All**, PS2, Xbox, Xbox 360, PSP, PS5, Xbox One/Series.
    A disc whose recompiler is not on the PC offers to download it; one the recompiler has no profile for is listed as
    experimental (generic path) or not supported yet. **INSTALL AND BUILD** copies and checks the game files, translates and
    compiles the game. It takes one to several hours the first time; finished steps are skipped when you run it again.
@@ -63,6 +64,14 @@ PC settings and dependencies open in their own windows; the log is also in `game
 `tools/ps5port` converts the executable and modules with the AnyPS5 relinker in a few minutes; no C++ Build Tools are
 needed (setup.json `"buildtools": false`). The PC settings become AnyPS5 variables when the game starts.
 
+**Xbox One / Series (xseriesrecomp).** A dump folder with `MicrosoftGame.config` at its top is recognised by the title
+id in that file (eight hex digits; a config without one gets an id from its own contents) and takes the generic path
+too: the port folder `.local/ports/<title id>` gets `installer.json` with `"mode": "link"` and the dump is recognised
+again by the SHA-256 of its `MicrosoftGame.config`. The recompiler's `tools/xsport` builds its runtime the first time
+and makes a run folder of links; the PC settings (display mode, window size, picture shape, vsync, frame rate, FSR /
+DLSS, input) become the runtime's variables when the game starts. The repository is private for now, so it is added
+from a local folder.
+
 ## Linux and macOS
 
 The same launcher (library with console tabs, recompilers, patches and cheats, PC settings, dependencies, Portuguese or
@@ -101,7 +110,7 @@ What differs from Windows:
   and for games whose `setup.json` build steps are Windows scripts (`cmd /c ...`), the library shows **No version for
   Linux / macOS** and explains it instead of trying. `recomps.json` lists the systems of each recompiler the launcher can
   download (`"platforms"`).
-- Today: PS2Recomp declares Linux and macOS; its games built with `tools/ps2port` (and discs without a profile, the generic
+- Today: PS2Recomp and xseriesrecomp (through Wine, not tried yet) declare Linux and macOS. PS2Recomp games built with `tools/ps2port` (and discs without a profile, the generic
   path) install there. Tried: a PlayStation 2 game installed and built through the launcher on Ubuntu 24.04 (WSL). macOS:
   the launcher is built, tested and started by CI; no game install has been tried on a Mac. The other recompilers
   (xboxrecomp, rexglue-ports, PSPRecomp, AnyPS5) are Windows only for now.
@@ -128,7 +137,7 @@ What differs from Windows:
 A recompiler that uses it has `tools/port-installer` as a submodule, `launcher.json` at its root (shared PC settings and
 tools) and per game `games/<game>/setup.json` (name, disc, steps) and `installer.json` (supported disc hashes).
 launcher.json may also hold `generic` (setup.json template for discs without a profile; `play_cmd` = the Play.cmd it
-writes), `generic_label` (regex of this console's disc labels in the library) and `deps.buildtools_gb: 0` (no C++ Build Tools).
+writes, `play_sh` = the Play.sh for Linux / macOS), `generic_label` (regex of this console's disc labels in the library) and `deps.buildtools_gb: 0` (no C++ Build Tools).
 setup.json `"pc_menu": false` says the game has no in-game F1 menu. If the
 submodule folder is empty (ZIP download), the launcher writes its own copy of these scripts there.
 
