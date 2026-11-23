@@ -14,7 +14,7 @@ typedef unsigned (*PfnDestroy)(NgxParameter *);
 typedef unsigned (*PfnCreate)(void *, int, NgxParameter *, void **);
 typedef unsigned (*PfnEvaluate)(void *, const void *, const NgxParameter *, void *);
 typedef unsigned (*PfnRelease)(void *);
-typedef unsigned (*PfnShutdown1)(void *);
+typedef unsigned (*PfnShutdown)(void);
 
 typedef void (*NgxSetD3D12)(NgxParameter *, const char *, void *);
 static void ngx_resource(NgxParameter *p, const char *k, void *v) { ((NgxSetD3D12)p->vtable[NGX_SET_D3D12])(p, k, v); }
@@ -27,7 +27,7 @@ static struct {
     PfnCreate create;
     PfnEvaluate evaluate;
     PfnRelease release;
-    PfnShutdown1 shutdown;
+    PfnShutdown shutdown;
     int ready;
     NgxParameter *params;
     void *feature;
@@ -59,8 +59,11 @@ int port_dlss_d3d12_start(void *device)
     d.destroy = (PfnDestroy)NGX_SYM(d.library, "NVSDK_NGX_D3D12_DestroyParameters");
     d.create = (PfnCreate)NGX_SYM(d.library, "NVSDK_NGX_D3D12_CreateFeature");
     d.evaluate = (PfnEvaluate)NGX_SYM(d.library, "NVSDK_NGX_D3D12_EvaluateFeature_C");
+    if (!d.evaluate)   /* the driver runtime exports it without the static library's _C suffix (as for Vulkan) */
+        d.evaluate = (PfnEvaluate)NGX_SYM(d.library, "NVSDK_NGX_D3D12_EvaluateFeature");
     d.release = (PfnRelease)NGX_SYM(d.library, "NVSDK_NGX_D3D12_ReleaseFeature");
-    d.shutdown = (PfnShutdown1)NGX_SYM(d.library, "NVSDK_NGX_D3D12_Shutdown1");
+    /* Not Shutdown1(device): on the Vulkan side the driver runtime faults in it after frames were evaluated. */
+    d.shutdown = (PfnShutdown)NGX_SYM(d.library, "NVSDK_NGX_D3D12_Shutdown");
     if (!d.init || !d.capability || !d.allocate || !d.create || !d.evaluate || !d.release) {
         snprintf(g_error, sizeof g_error, "the NGX runtime lacks the Direct3D 12 entry points");
         return 0;
@@ -85,12 +88,12 @@ int port_dlss_d3d12_start(void *device)
     if (!NGX_OK(d.capability(&caps)) || !caps || !ngx_get_i(caps, "SuperSampling.Available", 0)) {
         snprintf(g_error, sizeof g_error, "DLSS is not available on this card or driver (needs an RTX card and "
                                           "nvngx_dlss.dll next to the game)");
-        if (d.shutdown) d.shutdown(device);
+        if (d.shutdown) d.shutdown();
         return 0;
     }
     if (!NGX_OK(d.allocate(&d.params)) || !d.params) {
         snprintf(g_error, sizeof g_error, "NGX parameters could not be allocated");
-        if (d.shutdown) d.shutdown(device);
+        if (d.shutdown) d.shutdown();
         return 0;
     }
     d.ready = 1;
@@ -142,6 +145,6 @@ void port_dlss_d3d12_stop(void)
 {
     if (d.feature && d.release) d.release(d.feature);
     if (d.params && d.destroy) d.destroy(d.params);
-    if (d.ready && d.shutdown) d.shutdown(d.device);
+    if (d.ready && d.shutdown) d.shutdown();
     memset(&d, 0, sizeof d);
 }
