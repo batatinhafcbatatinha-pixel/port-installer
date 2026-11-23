@@ -402,6 +402,41 @@ static class Tests {
     Equal("build/native/bin/PSPNative.exe", r.ConfigFor(g).Exe, "exe from the generic block");
   }
 
+  // A generic port takes the generic block's settings (not the repository's games'), and a choice with a word
+  // stores that word in the ini key.
+  static void TestGenericPortSettings() {
+    string repo = Temp();
+    Directory.CreateDirectory(Path.Combine(repo, "games"));
+    string port = Path.Combine(repo, ".local", "ports", "584108B7");
+    Directory.CreateDirectory(port);
+    File.WriteAllText(Path.Combine(port, "setup.json"), "{\"game\": \"T\", \"play\": \"Play.cmd\"}");
+    File.WriteAllText(Path.Combine(port, "installer.json"), "{\"required_files\": {\"default.xex\": \"00\"}}");
+    File.WriteAllText(Path.Combine(repo, "launcher.json"),
+        "{\"recomp\": \"rexglue-ports\", \"games_dir\": \"games\", \"ini\": \"own.ini\", " +
+        "\"groups\": [{\"pt\": \"Seus\", \"en\": \"Own\", \"items\": [{\"key\": \"x\", \"pt\": \"X\", \"en\": \"X\"}]}], " +
+        "\"generic\": {\"play\": \"Play.cmd\", \"steps\": [], \"settings\": {\"ini\": \"pc-settings.ini\", \"section\": \"video\", " +
+        "\"groups\": [{\"pt\": \"Vídeo\", \"en\": \"Video\", \"items\": [" +
+        "{\"key\": \"post_effect\", \"pt\": \"AA\", \"en\": \"AA\", \"default\": 0, \"choices\": [" +
+        "{\"v\": 0, \"pt\": \"Desligado\", \"en\": \"Off\", \"word\": \"none\"}, {\"v\": 1, \"pt\": \"FXAA\", \"en\": \"FXAA\", \"word\": \"fxaa\"}]}," +
+        "{\"key\": \"resolution_scale\", \"pt\": \"R\", \"en\": \"R\", \"default\": 1, \"choices\": [{\"v\": 1, \"pt\": \"1\"}, {\"v\": 3, \"pt\": \"3\"}]}" +
+        "]}]}}}");
+    var r = Recomp.Load(repo);
+    var g = r.Games.Single(x => x.Id == "584108B7");
+    var cfg = r.ConfigFor(g);
+    Equal("pc-settings.ini", cfg.Ini, "the generic block's ini");
+    Equal("video", cfg.Section, "its section");
+    Equal("post_effect", cfg.Groups.Single().Items[0].Key, "its settings, not the repository's games'");
+    string ini = Path.Combine(port, cfg.Ini);
+    var aa = cfg.Groups[0].Items[0];
+    var scale = cfg.Groups[0].Items[1];
+    Equal(0, SettingsStore.Read(aa, cfg, port, null, ini, null), "default while the ini has nothing");
+    SettingsStore.Write(aa, 1, cfg, port, null, ini, null);
+    SettingsStore.Write(scale, 3, cfg, port, null, ini, null);
+    Equal("fxaa", Ini.GetText(ini, "video", "post_effect"), "the word goes into the ini");
+    Equal("3", Ini.GetText(ini, "video", "resolution_scale"), "a number stays a number");
+    Equal(1, SettingsStore.Read(aa, cfg, port, null, ini, null), "and reads back as its choice");
+  }
+
   static void TestGameInstallSafePaths() {
     foreach (string bad in new[] { "../x", "a/../b", "CON", "a/NUL.txt", "a\\b", "/abs", "x:y", "trail." })
       try { GameInstall.SafePath(bad); throw new Exception("accepted " + bad); } catch (InvalidDataException) { }

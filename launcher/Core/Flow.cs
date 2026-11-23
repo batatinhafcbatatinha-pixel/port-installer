@@ -264,6 +264,11 @@ static class SettingsStore {
       var hit = s.Choices.FirstOrDefault(c => c.Set.All(kv => number(kv.Key, int.MinValue) == kv.Value));
       return hit != null ? hit.Value : s.Default;
     }
+    if (s.Choices.Count > 0 && s.Choices.All(c => c.Word != null)) {   // the key holds a word (fsr, Desktop...)
+      string word = text(s.Key).Trim();
+      var hit = s.Choices.FirstOrDefault(c => string.Equals(c.Word, word, StringComparison.OrdinalIgnoreCase));
+      return hit != null ? hit.Value : s.Default;
+    }
     if (s.Div > 0)
       return double.TryParse(text(s.Key), NumberStyles.Float, CultureInfo.InvariantCulture, out double d) ? (int)Math.Round(d * s.Div) : s.Default;
     return number(s.Key, s.Default);
@@ -285,6 +290,10 @@ static class SettingsStore {
     var choice = s.Choices.FirstOrDefault(c => c.Value == value);
     if (choice != null && choice.Set.Count > 0) {
       foreach (var kv in choice.Set) put(kv.Key, kv.Value.ToString(CultureInfo.InvariantCulture));
+      return;
+    }
+    if (choice?.Word != null && s.Choices.All(c => c.Word != null)) {
+      put(s.Key, choice.Word);
       return;
     }
     put(s.Key, s.Div > 0 ? (value / (double)s.Div).ToString("0.00", CultureInfo.InvariantCulture) : value.ToString(CultureInfo.InvariantCulture));

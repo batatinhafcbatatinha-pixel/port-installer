@@ -80,6 +80,22 @@ sealed class GameConfig {
       if (deps.TryGetValue("game_files", out var gf) && gf is IDictionary<string, object> files)
         foreach (var kv in files) c.GameFiles[kv.Key] = Convert.ToString(kv.Value);
     }
+    ParseGroups(d, c.Groups);
+    return c;
+  }
+
+  // A recompiler's settings for the games it builds with its generic path (launcher.json "generic": {"settings":
+  // {"ini", "section", "ini_format", "groups"}}), in place of the repository's own games' settings.
+  public void ApplySettings(IDictionary<string, object> s) {
+    Ini = Str(s, "ini", Ini);
+    Section = Str(s, "section", Section);
+    PlainIni = Str(s, "ini_format") == "plain";
+    PcMenu = s.TryGetValue("pc_menu", out var m) && m is bool b && b;
+    Groups.Clear();
+    ParseGroups(s, Groups);
+  }
+
+  static void ParseGroups(IDictionary<string, object> d, List<Group> groups) {
     foreach (var g in List(d, "groups")) {
       var group = new Group { Pt = Str(g, "pt"), En = Str(g, "en") };
       foreach (var s in List(g, "items")) {
@@ -98,9 +114,8 @@ sealed class GameConfig {
         }
         group.Items.Add(item);
       }
-      c.Groups.Add(group);
+      groups.Add(group);
     }
-    return c;
   }
 
   // launcher.json next to the launcher (a kit folder) wins over the copy built into the exe.

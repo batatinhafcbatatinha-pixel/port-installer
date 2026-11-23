@@ -330,6 +330,12 @@ sealed class Recomp {
     if (s.TryGetValue("disk_gb", out var gb) && gb != null) c.DiskGb = Convert.ToInt32(gb);
     if (s.TryGetValue("exe", out var exe) && exe != null) c.Exe = Convert.ToString(exe);
     if (s.TryGetValue("pc_menu", out var menu) && menu is bool hasMenu) c.PcMenu = hasMenu;
+    // A game built with the generic path (.local/ports) has the generic path's settings, not those of the
+    // repository's own games.
+    bool generic = Path.GetFullPath(game.Dir).StartsWith(Path.GetFullPath(PortsDir) + Path.DirectorySeparatorChar,
+                                                          StringComparison.OrdinalIgnoreCase);
+    if (generic && Generic != null && Generic.TryGetValue("settings", out var gs) && gs is IDictionary<string, object> settings)
+      c.ApplySettings(settings);
     c.Repo = Repo;
     c.ToolsRoot = Root;
     c.GameFiles.Clear();
