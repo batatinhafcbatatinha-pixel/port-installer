@@ -318,6 +318,7 @@ sealed partial class MainForm : Form {
     var config = MenuTop(L.T("Configurações", "Settings"),
         Item(L.T("Configurações do PC...", "PC settings..."), ShowSettings, Keys.Control | Keys.P),
         Item(L.T("Dependências...", "Dependencies..."), ShowDeps, Keys.Control | Keys.D),
+        Item(L.T("Controles...", "Controllers..."), ShowControllers, Keys.Control | Keys.J),
         Sep(),
         LanguageMenu());
 
@@ -507,11 +508,13 @@ sealed partial class MainForm : Form {
     tbSettings.Click += (s, e) => ShowSettings();
     tbDeps = new ToolButton(Glyph.Box, L.T("Dependências", "Dependencies"), 92);
     tbDeps.Click += (s, e) => ShowDeps();
+    var tbPads = new ToolButton(Glyph.Gear, L.T("Controles", "Controllers"), 84);
+    tbPads.Click += (s, e) => ShowControllers();
     tbRecomps = new ToolButton(Glyph.Update, L.T("Recompiladores", "Recompilers"), 104);
     tbRecomps.Click += (s, e) => ShowRecomps();
     var tbLog = new ToolButton(Glyph.Log, "Log");
     tbLog.Click += (s, e) => SetLogVisible(!logPanel.Visible);
-    left.Controls.AddRange(new Control[] { tbOpen, tbFolders, tbRefresh, new ToolSeparator(), tbPlay, tbStop, tbInstall, new ToolSeparator(), tbSettings, tbDeps, tbRecomps, tbLog });
+    left.Controls.AddRange(new Control[] { tbOpen, tbFolders, tbRefresh, new ToolSeparator(), tbPlay, tbStop, tbInstall, new ToolSeparator(), tbSettings, tbDeps, tbPads, tbRecomps, tbLog });
     if (!Lib) { tbFolders.Visible = tbRefresh.Visible = tbRecomps.Visible = false; }
 
     var right = new FlowLayoutPanel { Dock = DockStyle.Right, AutoSize = true, WrapContents = false, BackColor = Theme.Surface, Padding = new Padding(0, 12, 0, 0) };

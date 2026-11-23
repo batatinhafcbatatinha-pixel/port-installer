@@ -404,6 +404,36 @@ static class Tests {
 
   // A generic port takes the generic block's settings (not the repository's games'), and a choice with a word
   // stores that word in the ini key.
+  // ------------------------------------------------------------------ controllers (input.ini, port_input)
+
+  static void TestInputSettingsScope() {
+    string game = Temp();
+    InputSettings.Put("stick_deadzone", 20, null);
+    Equal(20, InputSettings.GetInt("stick_deadzone", game, 12), "global seen by a game");
+    InputSettings.Put("stick_deadzone", 7, game);
+    Equal(7, InputSettings.GetInt("stick_deadzone", game, 12), "game over global");
+    Equal(20, InputSettings.GetInt("stick_deadzone", null, 12), "global untouched");
+    Equal(100, InputSettings.GetInt("mouse_sensitivity", game, 100), "default");
+  }
+
+  static void TestRemapRoundTrip() {
+    var c = new Controller { Guid = "03000000de280000ff11000000000000", Name = "Pad" };
+    var r = Remap.Parse("03000000de280000ff11000000000000,Pad,a:b0,b:b1,leftx:a0,dpup:h0.1,platform:Windows,");
+    Equal("b0", r.Fields["a"], "parsed a");
+    Check(!r.Fields.ContainsKey("platform"), "platform dropped");
+    r.Set("a", new RawInput { Source = "b5" });
+    r.Set("leftx", new RawInput { Source = "-a3" });
+    r.Set("righttrigger", new RawInput { Source = "a5" });
+    Equal("03000000de280000ff11000000000000,Pad,a:b5,b:b1,righttrigger:a5,dpup:h0.1,leftx:a3,platform:Windows,", r.ToMapping(c), "mapping");
+  }
+
+  static void TestSdlLists() {
+    if (!OS.Windows) return;
+    Check(Sdl.Start(), "SDL3 starts: " + Sdl.Error);
+    var list = Sdl.List();   // usually empty on a test machine; must not throw
+    foreach (var c in list) Check(c.Guid.Length == 32, "GUID text");
+  }
+
   static void TestGenericPortSettings() {
     string repo = Temp();
     Directory.CreateDirectory(Path.Combine(repo, "games"));
