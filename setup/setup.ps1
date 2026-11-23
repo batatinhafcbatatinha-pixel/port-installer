@@ -99,7 +99,23 @@ $Python = Find-Python
 if (-not $Python) {
   Say 'Python 3.12 will be installed (for your user only).' 'O Python 3.12 sera instalado (so para o seu usuario).'
   if (-not (Ask 'Install Python now?' 'Instalar o Python agora?')) { Fail 'Python is required.' 'O Python e necessario.' }
-  Winget-Install 'Python.Python.3.12' @('--scope', 'user')
+  if (Get-Command winget -ErrorAction SilentlyContinue) { Winget-Install 'Python.Python.3.12' @('--scope', 'user') }
+  else {
+    # No winget (Windows LTSC/Server, clean machines): the pinned portable Python of the release bundles (make_bundle.py).
+    $pyUrl = 'https://github.com/astral-sh/python-build-standalone/releases/download/20251014/cpython-3.12.12+20251014-x86_64-pc-windows-msvc-install_only.tar.gz'
+    $pySha = '2d670beb3b930d30e3a13cc909923a001dbdfcb5537692d5da40b6b41643ce1c'
+    $pyDir = if ($ToolsDir) { Join-Path (Split-Path -Parent $ToolsDir) 'python' } else { Join-Path $Root '.local\python' }
+    $pyTmp = Join-Path (Split-Path -Parent $pyDir) 'python-download'
+    New-Item -ItemType Directory -Force -Path $pyTmp | Out-Null
+    $pyTar = Join-Path $pyTmp 'python.tar.gz'
+    $ProgressPreference = 'SilentlyContinue'
+    Invoke-WebRequest -Uri $pyUrl -OutFile $pyTar -UseBasicParsing
+    if ((Get-FileHash -LiteralPath $pyTar -Algorithm SHA256).Hash.ToLower() -ne $pySha) { Fail 'The Python download is corrupt (SHA-256 mismatch).' 'O download do Python esta corrompido (SHA-256 diferente).' }
+    & tar.exe -xzf $pyTar -C $pyTmp
+    if (Test-Path $pyDir) { Remove-Item -Recurse -Force $pyDir }
+    Move-Item -LiteralPath (Join-Path $pyTmp 'python') -Destination $pyDir
+    Remove-Item -Recurse -Force $pyTmp
+  }
   $Python = Find-Python
   if (-not $Python) { Fail 'Python was installed but not found. Restart the PC and run Setup again.' 'O Python foi instalado mas nao foi encontrado. Reinicie o PC e rode o Setup de novo.' }
 }
@@ -243,8 +259,12 @@ foreach ($s in $Setup.steps) {
     $cmd = @($s.run | ForEach-Object { Expand $_ })
     if ($s.reuse_if -and -not $Rebuild -and (Test-Path (Join-Path $Root $s.reuse_if))) { $cmd += $s.reuse_arg }
     $exe, $rest = $cmd
-    & $exe @rest
-    if ($LASTEXITCODE -eq 0) { break }
+    # stdout+stderr of the step go through the transcript too: otherwise setup-log.txt has no reason for a failure.
+    # (Continue: with Stop, the first stderr line of a native command would end the script)
+    $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & $exe @rest 2>&1 | ForEach-Object { "$_" } | Out-Host
+    $stepExit = $LASTEXITCODE; $ErrorActionPreference = $prevEap
+    if ($stepExit -eq 0) { break }
     # Fewer jobs only help once compiling has started (usually memory); other failures repeat the same way.
     if ($Jobs -le 1 -or -not $s.retry_if -or -not (Test-Path (Join-Path $Root $s.retry_if))) { Fail "The build failed at: $($s.name)." "O build falhou em: $($s.name)." }
     $Jobs = [math]::Max(1, [math]::Floor($Jobs / 2))
