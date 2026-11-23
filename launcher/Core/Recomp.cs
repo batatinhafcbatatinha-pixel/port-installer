@@ -197,7 +197,7 @@ sealed class Recomp {
     Directory.CreateDirectory(dir);
     string title = name ?? (Directory.Exists(disc) ? new DirectoryInfo(disc).Name : Path.GetFileNameWithoutExtension(disc));
     var setup = new Dictionary<string, object>(Generic);
-    setup.Remove("play_cmd");
+    setup.Remove("play_cmd"); setup.Remove("play_sh");
     setup["game"] = title;
     setup["disc"] = what + " (" + label + ")";
     File.WriteAllText(Path.Combine(dir, "setup.json"), PortLauncher.Json.Write(setup));
@@ -206,7 +206,7 @@ sealed class Recomp {
       ["required_files"] = required, ["expected_files"] = sizes, ["required_paths"] = new object[0],
     };
     File.WriteAllText(Path.Combine(dir, "installer.json"), PortLauncher.Json.Write(installer));
-    string play = Str(Generic, "play_cmd");
+    string play = OS.Windows ? Str(Generic, "play_cmd") : Str(Generic, "play_sh", Str(Generic, "play_cmd"));   // "play_sh": the same script for bash
     if (play != null) {
       string file = Path.Combine(dir, OS.ScriptName(Str(Generic, "play", "Play.cmd")));
       File.WriteAllText(file, play);
@@ -265,7 +265,7 @@ sealed class Recomp {
     Directory.CreateDirectory(dir);
     string title = string.IsNullOrEmpty(titleName) ? new DirectoryInfo(disc).Name : titleName;
     var setup = new Dictionary<string, object>(Generic);
-    setup.Remove("play_cmd");
+    setup.Remove("play_cmd"); setup.Remove("play_sh");
     setup["game"] = title;
     setup["disc"] = discName;
         File.WriteAllText(Path.Combine(dir, "setup.json"), PortLauncher.Json.Write(setup));
@@ -276,7 +276,7 @@ sealed class Recomp {
       ["required_paths"] = new object[0],
     };
     File.WriteAllText(Path.Combine(dir, "installer.json"), PortLauncher.Json.Write(installer));
-    string play = Str(Generic, "play_cmd");
+    string play = OS.Windows ? Str(Generic, "play_cmd") : Str(Generic, "play_sh", Str(Generic, "play_cmd"));   // "play_sh": the same script for bash
     if (play != null) {
       string file = Path.Combine(dir, OS.ScriptName(Str(Generic, "play", "Play.cmd")));
       File.WriteAllText(file, play);

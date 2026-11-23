@@ -57,8 +57,8 @@
     "repo": "batatinhafcbatatinha-pixel/xseriesrecomp",
     "branch": "main",
     "folder": "xseriesrecomp",
-    "platforms": ["windows"],
-    "pt": "Jogos de Xbox One e Xbox Series no Windows a partir do seu dump: o código do jogo já é x86-64 e o runtime fornece as bibliotecas do console. Repositório ainda privado: aponte para uma pasta local.",
-    "en": "Xbox One and Xbox Series games on Windows from your dump: the game code is already x86-64 and the runtime supplies the console libraries. The repository is still private: point to a local folder."
+    "platforms": ["windows", "linux", "macos"],
+    "pt": "Jogos de Xbox One e Xbox Series a partir do seu dump: o código do jogo já é x86-64 e o runtime fornece as bibliotecas do console. No Linux e no macOS roda pelo Wine (ainda não testado). Repositório ainda privado: aponte para uma pasta local.",
+    "en": "Xbox One and Xbox Series games from your dump: the game code is already x86-64 and the runtime supplies the console libraries. On Linux and macOS it runs through Wine (not tested yet). The repository is still private: point to a local folder."
   }
 ]

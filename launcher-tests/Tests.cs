@@ -227,7 +227,7 @@ static class Tests {
     string root = Temp();
     File.WriteAllText(Path.Combine(root, "launcher.json"),
         "{\"recomp\": \"xs\", \"repo\": \"a/xseriesrecomp\", \"games_dir\": \"games\", \"exe\": \"build/run/plan.json\", \"generic_label\": \"^[0-9A-Fa-f]{8}$\"," +
-        " \"generic\": {\"play\": \"Play.cmd\", \"exe\": \"build/run/plan.json\", \"link_game\": true, \"play_cmd\": \"@echo off\\r\\n\"," +
+        " \"generic\": {\"play\": \"Play.cmd\", \"exe\": \"build/run/plan.json\", \"link_game\": true, \"play_cmd\": \"@echo off\\r\\n\", \"play_sh\": \"#!/usr/bin/env bash\\n\"," +
         " \"steps\": [{\"run\": [\"{python}\", \"x.py\"]}]}}");
     var r = Recomp.Load(root);
     Equal("1A2B3C4D", r.CreateGenericPort(dump, label), "port id");
@@ -239,6 +239,9 @@ static class Tests {
     Equal("link", Convert.ToString(inst["mode"]), "the dump is linked, not copied");
     Check(((IDictionary<string, object>)inst["required_files"]).ContainsKey("MicrosoftGame.config"), "recognised by its config");
     Check(File.Exists(Path.Combine(port, OS.ScriptName("Play.cmd"))), "play script");
+    Check(File.ReadAllText(Path.Combine(port, OS.ScriptName("Play.cmd"))).StartsWith(OS.Windows ? "@echo off" : "#!/usr/bin/env bash"),
+        "the play script is this system's (play_cmd on Windows, play_sh elsewhere)");
+    Check(!File.ReadAllText(Path.Combine(port, "setup.json")).Contains("play_sh"), "the script templates stay out of setup.json");
     r = Recomp.Load(root);
     var again = r.Detect(dump, out string l2);
     Check(again != null && again.Id == "1A2B3C4D", "the same dump is the same game the next time");

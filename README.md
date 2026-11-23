@@ -110,7 +110,7 @@ What differs from Windows:
   and for games whose `setup.json` build steps are Windows scripts (`cmd /c ...`), the library shows **No version for
   Linux / macOS** and explains it instead of trying. `recomps.json` lists the systems of each recompiler the launcher can
   download (`"platforms"`).
-- Today: PS2Recomp declares Linux and macOS; its games built with `tools/ps2port` (and discs without a profile, the generic
+- Today: PS2Recomp and xseriesrecomp (through Wine, not tried yet) declare Linux and macOS. PS2Recomp games built with `tools/ps2port` (and discs without a profile, the generic
   path) install there. Tried: a PlayStation 2 game installed and built through the launcher on Ubuntu 24.04 (WSL). macOS:
   the launcher is built, tested and started by CI; no game install has been tried on a Mac. The other recompilers
   (xboxrecomp, rexglue-ports, PSPRecomp, AnyPS5) are Windows only for now.
@@ -137,7 +137,7 @@ What differs from Windows:
 A recompiler that uses it has `tools/port-installer` as a submodule, `launcher.json` at its root (shared PC settings and
 tools) and per game `games/<game>/setup.json` (name, disc, steps) and `installer.json` (supported disc hashes).
 launcher.json may also hold `generic` (setup.json template for discs without a profile; `play_cmd` = the Play.cmd it
-writes), `generic_label` (regex of this console's disc labels in the library) and `deps.buildtools_gb: 0` (no C++ Build Tools).
+writes, `play_sh` = the Play.sh for Linux / macOS), `generic_label` (regex of this console's disc labels in the library) and `deps.buildtools_gb: 0` (no C++ Build Tools).
 setup.json `"pc_menu": false` says the game has no in-game F1 menu. If the
 submodule folder is empty (ZIP download), the launcher writes its own copy of these scripts there.
 
