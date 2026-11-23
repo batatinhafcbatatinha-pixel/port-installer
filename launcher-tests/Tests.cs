@@ -227,7 +227,7 @@ static class Tests {
     string root = Temp();
     File.WriteAllText(Path.Combine(root, "launcher.json"),
         "{\"recomp\": \"xs\", \"repo\": \"a/xseriesrecomp\", \"games_dir\": \"games\", \"exe\": \"build/run/plan.json\", \"generic_label\": \"^[0-9A-Fa-f]{8}$\"," +
-        " \"generic\": {\"play\": \"Play.cmd\", \"exe\": \"build/run/plan.json\", \"link_game\": true, \"play_cmd\": \"@echo off\r\n\"," +
+        " \"generic\": {\"play\": \"Play.cmd\", \"exe\": \"build/run/plan.json\", \"link_game\": true, \"play_cmd\": \"@echo off\\r\\n\"," +
         " \"steps\": [{\"run\": [\"{python}\", \"x.py\"]}]}}");
     var r = Recomp.Load(root);
     Equal("1A2B3C4D", r.CreateGenericPort(dump, label), "port id");
